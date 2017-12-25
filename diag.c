@@ -357,7 +357,7 @@ static void usage(void)
 
 int main(int argc, char **argv)
 {
-	struct diag_client *qxdm;
+	struct diag_client *client;
 	int ret;
 	int c;
 	bool debug = false;
@@ -394,18 +394,20 @@ int main(int argc, char **argv)
 	}
 	diag_dbg(DIAG_DBG_MAIN, "Debug mask is 0x%08X \n", diag_dbg_mask);
 
-	qxdm = malloc(sizeof(*qxdm));
-	memset(qxdm, 0, sizeof(*qxdm));
+	client = malloc(sizeof(*client));
+	memset(client, 0, sizeof(*client));
 
 	ret = diag_sock_connect(host_address, host_port);
 	if (ret < 0)
-		err(1, "failed to connect to qxdm");
-	qxdm->fd = ret;
-	qxdm->name = "QXDM";
+		err(1, "failed to connect to client");
+	client->fd = ret;
+	client->name = "DIAG CLIENT";
 
-	watch_add_readfd(ret, diag_sock_recv, qxdm);
-	watch_add_writeq(qxdm->fd, &qxdm->outq);
-	list_add(&diag_clients, &qxdm->node);
+	watch_add_readfd(ret, diag_sock_recv, client);
+	watch_add_writeq(client->fd, &client->outq);
+	list_add(&diag_clients, &client->node);
+
+	diag_dbg(DIAG_DBG_MAIN, "Opened client %s with fd=%d\n", client->name, client->fd);
 
 	peripheral_init();
 
