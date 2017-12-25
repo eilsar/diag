@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
  * Copyright (c) 2016, Linaro Ltd.
  * All rights reserved.
  *
@@ -46,12 +47,15 @@
 
 #include "diag.h"
 #include "diag_cntl.h"
+#include "diag_dbg.h"
 #include "hdlc.h"
 #include "list.h"
 #include "mbuf.h"
 #include "peripheral.h"
 #include "util.h"
 #include "watch.h"
+
+unsigned int diag_dbg_mask = DIAG_DBG_NONE;
 
 struct list_head diag_cmds = LIST_INIT(diag_cmds);
 struct list_head diag_clients = LIST_INIT(diag_clients);
