@@ -31,6 +31,8 @@
 
 #include <stdio.h>
 
+#include "util.h"
+
 extern unsigned int diag_dbg_mask;
 
 enum diag_debug_mask {
@@ -40,11 +42,13 @@ enum diag_debug_mask {
 	DIAG_DBG_PERIPHERAL			= 0x00000004,
 	DIAG_DBG_UTIL				= 0x00000008,
 	DIAG_DBG_WATCH				= 0x00000010,
+	DIAG_DBG_TRANSPORT			= 0x00000020,
 	DIAG_DBG_MAIN_DUMP			= 0x00010000,
 	DIAG_DBG_CNTL_DUMP			= 0x00020000,
 	DIAG_DBG_PERIPHERAL_DUMP	= 0x00040000,
 	DIAG_DBG_UTIL_DUMP			= 0x00080000,
 	DIAG_DBG_WATCH_DUMP			= 0x00100000,
+	DIAG_DBG_TRANSPORT_DUMP		= 0x00200000,
 	DIAG_DBG_ANY				= 0xffffffff,
 };
 
