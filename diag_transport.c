@@ -36,14 +36,19 @@
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "diag.h"
 #include "diag_dbg.h"
 #include "hdlc.h"
+#include "util.h"
+#include "watch.h"
 
-int diag_sock_connect(const char *hostname, unsigned short port)
+struct diag_transport_config *config = NULL;
+
+static int diag_sock_connect(const char *hostname, unsigned short port)
 {
 	struct sockaddr_in addr = {0};
 	int ret;
@@ -70,7 +75,7 @@ int diag_sock_connect(const char *hostname, unsigned short port)
 	return fd;
 }
 
-int diag_sock_recv(int fd, void* data)
+static int diag_transport_recv(int fd, void* data)
 {
 	struct diag_client *client = (struct diag_client *)data;
 	uint8_t buf[APPS_BUF_SIZE] = { 0 };
@@ -97,6 +102,39 @@ int diag_sock_recv(int fd, void* data)
 		diag_dbg_dump(DIAG_DBG_TRANSPORT_DUMP, "Packet: ", msg, msglen);
 		diag_client_handle_command(client, msg, msglen);
 	}
+
+	return 0;
+}
+
+int diag_transport_init(struct diag_transport_config *dtc)
+{
+	int ret;
+
+	config = dtc;
+	config->client = malloc(sizeof(struct diag_client));
+	memset(config->client, 0, sizeof(struct diag_client));
+
+	ret = diag_sock_connect(config->hostname, config->port);
+	if (ret < 0) {
+		err(1, "failed to connect to client");
+	}
+	config->client->fd = ret;
+	config->client->name = strdup("HOST PC");
+	diag_dbg(DIAG_DBG_TRANSPORT, "Established fd=%d, name=%s\n",
+			config->client->fd, config->client->name);
+
+	watch_add_readfd(config->client->fd, diag_transport_recv, config->client);
+	watch_add_writeq(config->client->fd, &config->client->outq);
+
+	return 0;
+}
+
+int diag_transport_exit()
+{
+	watch_remove_fd(config->client->fd);
+	free(config->client);
+	config->client = NULL;
+	config = NULL;
 
 	return 0;
 }

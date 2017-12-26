@@ -52,8 +52,8 @@
 struct diag_client {
 	const char *name;
 	int fd;
-
 	struct list_head outq;
+
 	struct list_head node;
 };
 
@@ -75,8 +75,15 @@ int diag_data_recv(int fd, void *data);
 
 #define APPS_BUF_SIZE 4096
 
-int diag_sock_connect(const char *hostname, unsigned short port);
-int diag_sock_recv(int fd, void* data);
 int diag_client_handle_command(struct diag_client *client, uint8_t *data, size_t len);
+
+struct diag_transport_config {
+	const char *hostname;
+	unsigned short port;
+	struct diag_client *client;
+};
+
+int diag_transport_init(struct diag_transport_config *config);
+int diag_transport_exit();
 
 #endif // __DIAG_H__
