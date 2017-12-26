@@ -202,6 +202,10 @@ static int diag_cmd_dispatch(struct diag_client *client,
 	else
 		key = 0xff << 24 | 0xff << 16 | ptr[0];
 
+	if (key == 0x4b320003) {
+		return hdlc_enqueue(&client->outq, ptr, len);
+	}
+
 	list_for_each(item, &diag_cmds) {
 		dc = container_of(item, struct diag_cmd, node);
 		if (key < dc->first || key > dc->last)
