@@ -29,10 +29,6 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -42,38 +38,12 @@
 
 #include "diag.h"
 #include "diag_dbg.h"
+#include "diag_transport.h"
 #include "hdlc.h"
 #include "util.h"
 #include "watch.h"
 
 struct diag_transport_config *config = NULL;
-
-static int diag_sock_connect(const char *hostname, unsigned short port)
-{
-	struct sockaddr_in addr = {0};
-	int ret;
-	int fd;
-
-	fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
-	if (fd < 0)
-		return -errno;
-
-	addr.sin_family = AF_INET;
-	inet_aton(hostname, &addr.sin_addr);
-	addr.sin_port = htons(port);
-
-	ret = connect(fd, (const struct sockaddr *)&addr, sizeof(addr));
-	if (ret < 0)
-		return -errno;
-
-	ret = fcntl(fd, F_SETFL, O_NONBLOCK);
-	if (ret < 0)
-		return -errno;
-
-	diag_info("Connected to %s:%d\n", hostname, port);
-
-	return fd;
-}
 
 static int diag_transport_recv(int fd, void* data)
 {

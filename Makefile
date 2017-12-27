@@ -3,7 +3,7 @@ DIAG := diag
 CFLAGS := -Wall -g -O2
 LDFLAGS := -ludev
 
-SRCS := diag.c diag_cntl.c diag_transport.c hdlc.c mbuf.c peripheral.c util.c watch.c
+SRCS := diag.c diag_cntl.c diag_transport.c diag_transport_sock.c hdlc.c mbuf.c peripheral.c util.c watch.c
 OBJS := $(SRCS:.c=.o)
 
 $(DIAG): $(OBJS)

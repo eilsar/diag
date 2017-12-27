@@ -29,63 +29,48 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef __DIAG_H__
-#define __DIAG_H__
+#include <err.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
 
-#include <stdint.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
-#include "list.h"
+#include "diag_dbg.h"
 
-#define DEFAULT_SOCKET_PORT 2500
+#define DEFAULT_PORT 2500
 
-#define BIT(x) (1 << (x))
-
-#define DIAG_FEATURE_FEATURE_MASK_SUPPORT	BIT(0)
-#define DIAG_FEATURE_LOG_ON_DEMAND_APPS		BIT(2)
-#define DIAG_FEATURE_REQ_RSP_SUPPORT		BIT(4)
-#define DIAG_FEATURE_APPS_HDLC_ENCODE		BIT(6)
-#define DIAG_FEATURE_STM			BIT(9)
-#define DIAG_FEATURE_PERIPHERAL_BUFFERING	BIT(10)
-#define DIAG_FEATURE_MASK_CENTRALIZATION	BIT(11)
-#define DIAG_FEATURE_SOCKETS_ENABLED		BIT(13)
-
-#define DIAG_CMD_SUBSYS_DISPATCH       75
-
-struct diag_client {
-	const char *name;
+int diag_sock_connect(const char *hostname, unsigned short port)
+{
+	struct sockaddr_in addr = {0};
+	int ret;
 	int fd;
-	struct list_head outq;
 
-	struct list_head node;
-};
+	if (!port) {
+		warn("Port undefined! Defaulting to %u\n", DEFAULT_PORT);
+		port = DEFAULT_PORT;
+	}
 
-struct diag_cmd {
-	struct list_head node;
+	diag_dbg(DIAG_DBG_TRANSPORT, "SOCKET address=%s port=%u\n", hostname, port);
+	fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (fd < 0)
+		return -errno;
 
-	unsigned int first;
-	unsigned int last;
+	addr.sin_family = AF_INET;
+	inet_aton(hostname, &addr.sin_addr);
+	addr.sin_port = htons(port);
 
-	struct peripheral *peripheral;
-};
+	ret = connect(fd, (const struct sockaddr *)&addr, sizeof(addr));
+	if (ret < 0)
+		return -errno;
 
-void queue_push(struct list_head *queue, uint8_t *msg, size_t msglen);
+	ret = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+	if (ret < 0)
+		return -errno;
 
-extern struct list_head diag_cmds;
+	diag_info("Connected to %s:%d\n", hostname, port);
 
-int diag_cmd_recv(int fd, void *data);
-int diag_data_recv(int fd, void *data);
-
-#define APPS_BUF_SIZE 4096
-
-int diag_client_handle_command(struct diag_client *client, uint8_t *data, size_t len);
-
-struct diag_transport_config {
-	const char *hostname;
-	unsigned short port;
-	struct diag_client *client;
-};
-
-int diag_transport_init(struct diag_transport_config *config);
-int diag_transport_exit();
-
-#endif // __DIAG_H__
+	return fd;
+}
