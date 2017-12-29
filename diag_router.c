@@ -54,10 +54,12 @@ static int diag_cmd_dispatch(struct diag_client *client,
 	uint8_t *ptr = buf;
 	struct mbuf *resp_packet;
 
-	if (ptr[0] == DIAG_CMD_SUBSYS_DISPATCH)
+	if (ptr[0] == DIAG_CMD_SUBSYS_DISPATCH || ptr[0] == DIAG_CMD_SUBSYS_DISPATCH_V2) {
 		key = ptr[0] << 24 | ptr[1] << 16 | ptr[3] << 8 | ptr[2];
-	else
+		diag_dbg_dump(DIAG_DBG_ROUTER_DUMP, "subsys cmdid = ", ptr, 4);
+	} else {
 		key = 0xff << 24 | 0xff << 16 | ptr[0];
+		diag_dbg_dump(DIAG_DBG_ROUTER_DUMP, "cmdid = ", ptr, 1);
 
 	if (key == 0x4b320003) {
 		resp_packet = create_packet(ptr, len, ENCODE);

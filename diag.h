@@ -49,11 +49,11 @@
 #define DIAG_FEATURE_MASK_CENTRALIZATION	BIT(11)
 #define DIAG_FEATURE_SOCKETS_ENABLED		BIT(13)
 
-#define DIAG_CMD_SUBSYS_DISPATCH       75
-
 #define DIAG_CMD_RSP_BAD_COMMAND			0x13
 #define DIAG_CMD_RSP_BAD_PARAMS				0x14
 #define DIAG_CMD_RSP_BAD_LENGTH				0x15
+#define DIAG_CMD_SUBSYS_DISPATCH       				75
+#define DIAG_CMD_SUBSYS_DISPATCH_V2					128
 
 struct diag_client {
 	const char *name;
