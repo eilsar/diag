@@ -61,7 +61,7 @@ static int diag_cmd_dispatch(struct diag_client *client,
 		key = 0xff << 24 | 0xff << 16 | ptr[0];
 		diag_dbg_dump(DIAG_DBG_ROUTER_DUMP, "cmdid = ", ptr, 1);
 
-	if (key == 0x4b320003) {
+	if (key == DIAG_CMD_KEEP_ALIVE_KEY) {
 		resp_packet = create_packet(ptr, len, ENCODE);
 		if (resp_packet == NULL) {
 
@@ -163,6 +163,21 @@ int diag_cmd_forward_to_peripheral(struct diag_cmd *dc, struct diag_client *clie
 	diag_dbg(DIAG_DBG_ROUTER, "forwarded to %s\n", peripheral->name);
 
 	return 0;
+}
+
+static struct diag_cmd *register_diag_cmd(unsigned int key,
+		int(*cb)(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len),
+		struct list_head *cmds)
+{
+	struct diag_cmd *dc = malloc(sizeof(struct diag_cmd));
+
+	memset(dc, 0, sizeof(struct diag_cmd));
+	dc->first = dc->last = key;
+	dc->cb = cb;
+
+	list_add(cmds, &dc->node);
+
+	return dc;
 }
 
 int diag_router_init()

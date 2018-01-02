@@ -52,8 +52,16 @@
 #define DIAG_CMD_RSP_BAD_COMMAND			0x13
 #define DIAG_CMD_RSP_BAD_PARAMS				0x14
 #define DIAG_CMD_RSP_BAD_LENGTH				0x15
+
+#define get_diag_cmd_key(cmd_id) \
+	(0xffff0000 | (0xffff & (cmd_id)))
+#define get_diag_cmd_subsys_dispatch_key(cmd_id, subsys_id, subsys_cmd) \
+	(((0xff & (cmd_id)) << 24) | ((0xff & (subsys_id)) << 16) | ((0xffff & (subsys_cmd))))
+
 #define DIAG_CMD_SUBSYS_DISPATCH       				75
 #define DIAG_CMD_SUBSYS_DISPATCH_V2					128
+
+#define DIAG_CMD_KEEP_ALIVE_KEY get_diag_cmd_subsys_dispatch_key(DIAG_CMD_SUBSYS_DISPATCH, 50, 0x0003)
 
 struct diag_client {
 	const char *name;
