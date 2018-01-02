@@ -63,6 +63,10 @@
 
 #define DIAG_CMD_KEEP_ALIVE_KEY get_diag_cmd_subsys_dispatch_key(DIAG_CMD_SUBSYS_DISPATCH, 50, 0x0003)
 
+#define DIAG_PROTOCOL_VERSION_NUMBER 				2
+#define DIAG_CMD_DIAG_VERSION_ID					28
+#define DIAG_CMD_DIAG_VERSION_KEY get_diag_cmd_key(DIAG_CMD_DIAG_VERSION_ID)
+
 struct diag_client {
 	const char *name;
 	int in_fd;

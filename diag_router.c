@@ -42,6 +42,8 @@
 #include "peripheral.h"
 #include "util.h"
 
+#define __packed __attribute__((packed))
+
 struct list_head apps_cmds = LIST_INIT(apps_cmds);
 
 static int diag_cmd_dispatch(struct diag_client *client,
@@ -165,6 +167,37 @@ int diag_cmd_forward_to_peripheral(struct diag_cmd *dc, struct diag_client *clie
 	return 0;
 }
 
+static int diag_router_handle_diag_version(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len)
+{
+	struct mbuf *resp_packet;
+	struct diag_version_request {
+		uint8_t cmd_code;
+	} *req = buf;
+	struct {
+		uint8_t cmd_code;
+		uint8_t ver;
+	} __packed resp;
+
+	if (sizeof(*req) != len) {
+		diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_LENGTH);
+
+		return -1;
+	}
+
+	resp.cmd_code = req->cmd_code;
+	resp.ver = DIAG_PROTOCOL_VERSION_NUMBER;
+
+	resp_packet = create_packet((uint8_t *)&resp, sizeof(resp), ENCODE);
+	if (resp_packet == NULL) {
+		warn("failed to create packet");
+
+		return -1;
+	}
+
+	queue_push(&client->outq, resp_packet);
+
+	return 0;
+}
 static struct diag_cmd *register_diag_cmd(unsigned int key,
 		int(*cb)(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len),
 		struct list_head *cmds)
@@ -182,7 +215,8 @@ static struct diag_cmd *register_diag_cmd(unsigned int key,
 
 int diag_router_init()
 {
-	/* Register the cmd's that need to be handled by the router (in case no other peripheral does) */
+	/* Register the cmd's that need to be handled by the router */
+	register_diag_cmd(DIAG_CMD_DIAG_VERSION_KEY, diag_router_handle_diag_version, &apps_cmds);
 	return 0;
 }
 
