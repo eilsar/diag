@@ -99,7 +99,7 @@ static int diag_cmd_dispatch(struct diag_client *client,
 }
 
 static int diag_rsp_bad_command(struct diag_client *client,
-				 void *buf, size_t len)
+				 void *buf, size_t len, uint8_t bad_code)
 {
 	uint8_t *resp_buf;
 	size_t resp_buf_len = len + 1;
@@ -112,7 +112,7 @@ static int diag_rsp_bad_command(struct diag_client *client,
 		return -ENOMEM;
 	}
 
-	resp_buf[0] = DIAG_CMD_RSP_BAD_COMMAND;
+	resp_buf[0] = bad_code;
 	memcpy(resp_buf + 1, buf, len);
 
 	resp_packet = create_packet(resp_buf, resp_buf_len, ENCODE);
@@ -133,7 +133,7 @@ int diag_router_handle_incoming(struct diag_client *client, void *buf, size_t le
 
 	ret = diag_cmd_dispatch(client, buf, len);
 	if (ret < 0)
-		ret = diag_rsp_bad_command(client, buf, len);
+		ret = diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_COMMAND);
 
 	return ret;
 }
