@@ -62,6 +62,7 @@ static int diag_cmd_dispatch(struct diag_client *client,
 	} else {
 		key = 0xff << 24 | 0xff << 16 | ptr[0];
 		diag_dbg_dump(DIAG_DBG_ROUTER_DUMP, "cmdid = ", ptr, 1);
+	}
 
 	if (key == DIAG_CMD_KEEP_ALIVE_KEY) {
 		resp_packet = create_packet(ptr, len, ENCODE);
@@ -167,6 +168,55 @@ int diag_cmd_forward_to_peripheral(struct diag_cmd *dc, struct diag_client *clie
 	return 0;
 }
 
+static int diag_router_handle_extended_build_id(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len)
+{
+	struct mbuf *resp_packet;
+	struct extended_build_id_request {
+		uint8_t cmd_code;
+	} *req = buf;
+	struct {
+		uint8_t cmd_code;
+		uint8_t ver;
+		uint8_t res0;
+		uint32_t msm_rev;
+		uint16_t res1;
+		uint32_t mobile_model_number;
+		char strings[];
+	} __packed *resp;
+	size_t resp_size;
+	size_t string1_size = strlen(MOBILE_SOFTWARE_REVISION) + 1;
+	size_t string2_size = strlen(MOBILE_MODEL_STRING) + 1;
+	size_t strings_size = string1_size + string2_size;
+
+	if (sizeof(*req) != len) {
+		diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_LENGTH);
+
+		return -1;
+	}
+
+	resp_size = sizeof(*resp) + strings_size;
+	resp = malloc(resp_size);
+
+	resp->cmd_code = req->cmd_code;
+	resp->ver = DIAG_PROTOCOL_VERSION_NUMBER;
+	resp->msm_rev = MSM_REVISION_NUMBER;
+	resp->mobile_model_number = MOBILE_MODEL_NUMBER;
+	strncpy(resp->strings, MOBILE_SOFTWARE_REVISION, string1_size);
+	strncpy(resp->strings + string1_size, MOBILE_MODEL_STRING, string2_size);
+
+	resp_packet = create_packet((uint8_t *)resp, resp_size, ENCODE);
+	free(resp);
+	if (resp_packet == NULL) {
+		warn("failed to create packet");
+
+		return -1;
+	}
+
+	queue_push(&client->outq, resp_packet);
+
+	return 0;
+}
+
 static int diag_router_handle_diag_version(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len)
 {
 	struct mbuf *resp_packet;
@@ -198,6 +248,7 @@ static int diag_router_handle_diag_version(struct diag_cmd *dc, struct diag_clie
 
 	return 0;
 }
+
 static struct diag_cmd *register_diag_cmd(unsigned int key,
 		int(*cb)(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len),
 		struct list_head *cmds)
@@ -217,6 +268,8 @@ int diag_router_init()
 {
 	/* Register the cmd's that need to be handled by the router */
 	register_diag_cmd(DIAG_CMD_DIAG_VERSION_KEY, diag_router_handle_diag_version, &apps_cmds);
+	register_diag_cmd(DIAG_CMD_EXTENDED_BUILD_ID_KEY, diag_router_handle_extended_build_id, &apps_cmds);
+
 	return 0;
 }
 
