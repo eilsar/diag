@@ -715,6 +715,48 @@ static int diag_router_handle_event_set_mask_response(struct diag_cmd *dc, struc
 	return ret;
 }
 
+static int diag_router_handle_event_report_control_response(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len)
+{
+	struct {
+		uint8_t cmd_code;
+		uint8_t operation_switch;
+	} __packed *req = buf;
+	struct {
+		uint8_t cmd_code;
+		uint16_t length;
+	} __packed pkt;
+	struct list_head *item;
+	struct peripheral *peripheral;
+	int ret;
+
+	if (sizeof(*req) != len) {
+		return diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_LENGTH);
+	}
+
+	switch (req->operation_switch)
+	{
+	case DIAG_CTRL_MASK_ALL_DISABLED:
+	case DIAG_CTRL_MASK_ALL_ENABLED:
+		diag_cmd_toggle_events(req->operation_switch);
+		pkt.cmd_code = req->cmd_code;
+		pkt.length = 0;
+
+		list_for_each(item, &peripherals) {
+			peripheral = container_of(item, struct peripheral, node);
+			diag_cntl_send_event_mask(peripheral);
+		}
+
+		ret = send_packet(client, (uint8_t *)&pkt, sizeof(pkt), ENCODE);
+		break;
+	default:
+		warn("Unrecognized operation %d!!!", req->operation_switch);
+		ret = diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_PARAMS);
+		break;
+	}
+
+	return ret;
+}
+
 static void diag_router_send_msg_mask_to_all()
 {
 	int i;
@@ -838,6 +880,7 @@ static int diag_cmds_init()
 	register_diag_cmd(DIAG_CMD_EXTENDED_MESSAGE_CONFIGURATION_KEY, diag_router_handle_extended_message_configuration_response, &common_cmds);
 	register_diag_cmd(DIAG_CMD_GET_MASK_KEY, diag_router_handle_event_get_mask_response, &common_cmds);
 	register_diag_cmd(DIAG_CMD_SET_MASK_KEY, diag_router_handle_event_set_mask_response, &common_cmds);
+	register_diag_cmd(DIAG_CMD_EVENT_REPORT_CONTROL_KEY, diag_router_handle_event_report_control_response, &common_cmds);
 
 	return 0;
 }

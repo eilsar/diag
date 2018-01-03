@@ -87,6 +87,8 @@
 #define DIAG_CMD_GET_MASK_KEY get_diag_cmd_key(DIAG_CMD_GET_MASK)
 #define DIAG_CMD_SET_MASK 							0x82
 #define DIAG_CMD_SET_MASK_KEY get_diag_cmd_key(DIAG_CMD_SET_MASK)
+#define DIAG_CMD_EVENT_REPORT_CONTROL 				0x60
+#define DIAG_CMD_EVENT_REPORT_CONTROL_KEY get_diag_cmd_key(DIAG_CMD_EVENT_REPORT_CONTROL)
 
 struct diag_client {
 	const char *name;
