@@ -104,7 +104,7 @@ extern struct list_head diag_cmds;
 int diag_cmd_recv(int fd, void *data);
 int diag_data_recv(int fd, void *data);
 
-#define APPS_BUF_SIZE 4096
+#define APPS_BUF_SIZE 16384
 
 int diag_router_handle_incoming(struct diag_client *client, void *buf, size_t len);
 

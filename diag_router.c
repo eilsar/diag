@@ -36,14 +36,19 @@
 #include <string.h>
 
 #include "diag.h"
+#include "diag_cntl.h"
 #include "diag_dbg.h"
 #include "list.h"
+#include "masks.h"
 #include "mbuf.h"
 #include "peripheral.h"
 #include "util.h"
 
-#define __packed __attribute__((packed))
+#ifndef __packed
+#define __packed __attribute__((__packed__))
+#endif
 
+struct list_head common_cmds = LIST_INIT(common_cmds);
 struct list_head apps_cmds = LIST_INIT(apps_cmds);
 
 static int diag_cmd_dispatch(struct diag_client *client,
@@ -74,6 +79,17 @@ static int diag_cmd_dispatch(struct diag_client *client,
 		queue_push(&client->outq, resp_packet);
 
 		return 0;
+	}
+
+	list_for_each(item, &common_cmds) {
+		dc = container_of(item, struct diag_cmd, node);
+		if (key < dc->first || key > dc->last) {
+			continue;
+		}
+
+		diag_dbg(DIAG_DBG_ROUTER, "Respond via apps handler\n");
+
+		return dc->cb(dc, client, buf, len);
 	}
 
 	list_for_each(item, &diag_cmds) {
@@ -110,11 +126,9 @@ static int diag_rsp_bad_command(struct diag_client *client,
 	size_t resp_buf_len = len + 1;
 	struct mbuf *resp_packet;
 
-	resp_buf = malloc(resp_buf_len);
-	if (!resp_buf) {
+	if (posix_memalign((void **)&resp_buf, PACKET_ALLOC_ALIGNMENT, resp_buf_len)) {
 		warn("failed to allocate error buffer");
-
-		return -ENOMEM;
+		return -errno;
 	}
 
 	resp_buf[0] = bad_code;
@@ -166,6 +180,23 @@ int diag_cmd_forward_to_peripheral(struct diag_cmd *dc, struct diag_client *clie
 	diag_dbg(DIAG_DBG_ROUTER, "forwarded to %s\n", peripheral->name);
 
 	return 0;
+}
+
+static void diag_router_send_msg_mask_to_all()
+{
+	int i;
+	struct diag_ssid_range_t range;
+	struct list_head *item;
+	struct peripheral *peripheral;
+
+	for (i = 0; i < MSG_MASK_TBL_CNT; i++) {
+		range.ssid_first = ssid_first_arr[i];
+		range.ssid_last = ssid_last_arr[i];
+		list_for_each(item, &peripherals) {
+			peripheral = container_of(item, struct peripheral, node);
+			diag_cntl_send_msg_mask(peripheral, &range);
+		}
+	}
 }
 
 static int diag_router_handle_extended_build_id(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len)
@@ -264,7 +295,7 @@ static struct diag_cmd *register_diag_cmd(unsigned int key,
 	return dc;
 }
 
-int diag_router_init()
+static int diag_cmds_init()
 {
 	/* Register the cmd's that need to be handled by the router */
 	register_diag_cmd(DIAG_CMD_DIAG_VERSION_KEY, diag_router_handle_diag_version, &apps_cmds);
@@ -273,16 +304,46 @@ int diag_router_init()
 	return 0;
 }
 
-int diag_router_exit()
+static int diag_cmds_exit()
 {
 	struct list_head *item, *next;
 	struct diag_cmd *dc;
 
+	list_for_each_safe(item, next, &common_cmds) {
+		dc = container_of(item, struct diag_cmd, node);
+		list_del(&dc->node);
+		free(dc);
+	}
 	list_for_each_safe(item, next, &apps_cmds) {
 		dc = container_of(item, struct diag_cmd, node);
 		list_del(&dc->node);
 		free(dc);
 	}
+
+	return 0;
+}
+
+int diag_router_init()
+{
+	int ret;
+
+	/* Init the masks */
+	ret = diag_masks_init();
+	if (ret)
+		return ret;
+
+	diag_router_send_msg_mask_to_all();
+
+	/* Register the cmd's that need to be handled by the router */
+	ret = diag_cmds_init();
+
+	return ret;
+}
+
+int diag_router_exit()
+{
+	diag_cmds_exit();
+	diag_masks_exit();
 
 	return 0;
 }
