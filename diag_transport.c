@@ -29,6 +29,8 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+#include <sys/time.h>
+#include <time.h>
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -44,6 +46,7 @@
 #include "watch.h"
 
 struct diag_transport_config *config = NULL;
+uint8_t buf[APPS_BUF_SIZE] = { 0 };
 
 static int diag_transport_recv(int fd, void* data)
 {
@@ -78,16 +81,21 @@ static int diag_transport_recv(int fd, void* data)
 
 int diag_transport_init(struct diag_transport_config *dtc)
 {
-	int ret;
+	int ret = -1;
 
 	config = dtc;
 	config->client = malloc(sizeof(struct diag_client));
 	memset(config->client, 0, sizeof(struct diag_client));
 
-	ret = diag_sock_connect(config->hostname, config->port);
-	if (ret < 0) {
-		err(1, "failed to connect to client");
-	}
+	if (config->hostname)
+		ret = diag_sock_connect(config->hostname, config->port);
+	else if (config->uartname)
+		ret = diag_uart_connect(config->uartname, config->baudrate);
+	else
+		warn("no configured connection mode\n");
+	if (ret < 0)
+		return ret;
+
 	config->client->fd = ret;
 	config->client->name = strdup("HOST PC");
 	diag_dbg(DIAG_DBG_TRANSPORT, "Established fd=%d, name=%s\n",

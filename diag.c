@@ -230,14 +230,16 @@ static void usage(void)
 	fprintf(stderr,
 		"User space application for diag interface\n"
 		"\n"
-		"usage: diag [-hdms]\n"
+		"usage: diag [-hdmsu]\n"
 		"\n"
 		"options:\n"
 		"   -h   show this usage\n"
 		"   -d   show more debug messages\n"
 		"   -m   <debug mask>\n"
 		"   -s   <socket address[:port]>\n"
+		"   -u   <uart device name[@baudrate]>\n"
 	);
+
 	exit(1);
 }
 
@@ -249,10 +251,15 @@ int main(int argc, char **argv)
 	bool debug = false;
 	char *host_address = "";
 	int host_port = DEFAULT_SOCKET_PORT;
+	char *uartdev = "";
+	int baudrate = DEFAULT_BAUD_RATE;
 	char *token;
 
+	if (argc == 1)
+		usage();
+
 	for (;;) {
-		c = getopt(argc, argv, "m:hds:");
+		c = getopt(argc, argv, "m:hds:u:");
 		if (c < 0)
 			break;
 		switch (c) {
@@ -268,6 +275,12 @@ int main(int argc, char **argv)
 			if (token)
 				host_port = atoi(token);
 			break;
+		case 'u':
+			uartdev = strtok(strdup(optarg), "@");
+			token = strtok(NULL, "");
+			if (token)
+				baudrate = atoi(token);
+			break;
 		default:
 		case 'h':
 			usage();
@@ -282,6 +295,10 @@ int main(int argc, char **argv)
 
 	config.hostname = host_address;
 	config.port = host_port;
+
+	config.uartname = uartdev;
+	config.baudrate = baudrate;
+
 	ret = diag_transport_init(&config);
 	if (ret < 0)
 		err(1, "failed to connect to client");

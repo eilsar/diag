@@ -36,8 +36,6 @@
 
 #include "list.h"
 
-#define DEFAULT_SOCKET_PORT 2500
-
 #define BIT(x) (1 << (x))
 
 #define DIAG_FEATURE_FEATURE_MASK_SUPPORT	BIT(0)
@@ -82,8 +80,13 @@ int diag_client_handle_command(struct diag_client *client, uint8_t *data, size_t
 struct diag_transport_config {
 	const char *hostname;
 	unsigned short port;
+	const char *uartname;
+	unsigned int baudrate;
 	struct diag_client *client;
 };
+
+#define DEFAULT_SOCKET_PORT 2500
+#define DEFAULT_BAUD_RATE 115200
 
 int diag_transport_init(struct diag_transport_config *config);
 int diag_transport_exit();
