@@ -51,6 +51,8 @@
 
 #define DIAG_CMD_SUBSYS_DISPATCH       75
 
+#define DIAG_CMD_RSP_BAD_COMMAND			0x13
+
 struct diag_client {
 	const char *name;
 	int in_fd;
@@ -60,9 +62,10 @@ struct diag_client {
 	struct list_head node;
 };
 
+extern struct list_head diag_clients;
+
 struct diag_cmd {
 	struct list_head node;
-
 	unsigned int first;
 	unsigned int last;
 
@@ -76,7 +79,7 @@ int diag_data_recv(int fd, void *data);
 
 #define APPS_BUF_SIZE 4096
 
-int diag_client_handle_command(struct diag_client *client, uint8_t *data, size_t len);
+int diag_client_handle_command(struct diag_client *client, void *buf, size_t len);
 
 struct diag_transport_config {
 	const char *hostname;

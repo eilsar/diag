@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -43,12 +43,14 @@ enum diag_debug_mask {
 	DIAG_DBG_UTIL				= 0x00000008,
 	DIAG_DBG_WATCH				= 0x00000010,
 	DIAG_DBG_TRANSPORT			= 0x00000020,
+	DIAG_DBG_ROUTER				= 0x00000040,
 	DIAG_DBG_MAIN_DUMP			= 0x00010000,
 	DIAG_DBG_CNTL_DUMP			= 0x00020000,
 	DIAG_DBG_PERIPHERAL_DUMP	= 0x00040000,
 	DIAG_DBG_UTIL_DUMP			= 0x00080000,
 	DIAG_DBG_WATCH_DUMP			= 0x00100000,
 	DIAG_DBG_TRANSPORT_DUMP		= 0x00200000,
+	DIAG_DBG_ROUTER_DUMP		= 0x00400000,
 	DIAG_DBG_ANY				= 0xffffffff,
 };
 
