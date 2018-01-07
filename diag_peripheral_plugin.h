@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
  * met:
@@ -13,7 +13,7 @@
  *     * Neither the name of The Linux Foundation nor the names of its
  *       contributors may be used to endorse or promote products derived
  *       from this software without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
  * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
@@ -26,50 +26,40 @@
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef __DIAG_DBG_H__
-#define __DIAG_DBG_H__
+#ifndef __DIAG_PERIPHERAL_PLUGIN_H__
+#define __DIAG_PERIPHERAL_PLUGIN_H__
 
+#include <sys/ioctl.h>
+#include <sys/types.h>
+
+#include <err.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
 
-#include "util.h"
+#include "diag.h"
 
-extern unsigned int diag_dbg_mask;
-
-enum diag_debug_mask {
-	DIAG_DBG_NONE				= 0x00000000,
-	DIAG_DBG_MAIN				= 0x00000001,
-	DIAG_DBG_CNTL				= 0x00000002,
-	DIAG_DBG_PERIPHERAL			= 0x00000004,
-	DIAG_DBG_UTIL				= 0x00000008,
-	DIAG_DBG_WATCH				= 0x00000010,
-	DIAG_DBG_TRANSPORT			= 0x00000020,
-	DIAG_DBG_ROUTER				= 0x00000040,
-	DIAG_DBG_MASKS				= 0x00000080,
-	DIAG_DBG_MAIN_DUMP			= 0x00010000,
-	DIAG_DBG_CNTL_DUMP			= 0x00020000,
-	DIAG_DBG_PERIPHERAL_DUMP	= 0x00040000,
-	DIAG_DBG_UTIL_DUMP			= 0x00080000,
-	DIAG_DBG_WATCH_DUMP			= 0x00100000,
-	DIAG_DBG_TRANSPORT_DUMP		= 0x00200000,
-	DIAG_DBG_ROUTER_DUMP		= 0x00400000,
-	DIAG_DBG_MASKS_DUMP			= 0x00800000,
-	DIAG_DBG_PLUGIN				= 0x80000000,
-	DIAG_DBG_ANY				= 0xffffffff,
+struct diag_cmd_registration_entry {
+	uint32_t first_cmd;
+	uint32_t last_cmd;
+	int (*cb)(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len);
 };
 
-#define pr_fmt(fmt) "DIAG: " fmt
+struct diag_cmd_registration_header {
+	uint32_t num_of_entries;
+};
 
-#define diag_info(fmt, arg...) \
-	printf(pr_fmt("INFO " fmt "\n"), ##arg)
+struct diag_cmd_registration_table {
+	struct diag_cmd_registration_header hdr;
+	struct diag_cmd_registration_entry *table;
+};
 
-#define diag_dbg(mask, fmt, arg...) do { \
-	if (diag_dbg_mask & mask) \
-		printf(pr_fmt("%s@%s#%u: " fmt), __FILE__, __FUNCTION__, __LINE__, ##arg); \
-} while (0)
-
-#define diag_dbg_dump(mask, prefix_str, buf, len) do { \
-	if (diag_dbg_mask & mask) \
-		print_hex_dump(pr_fmt(prefix_str), (buf), len); \
-} while (0)
-
-#endif // __DIAG_DBG_H__
+void diag_get_cmd_registration_table(struct diag_cmd_registration_table **tbl_ptr);
+int diag_set_pipe(int fd);
+int diag_set_debug_level(int level);
+#endif // __DIAG_PERIPHERAL_PLUGIN_H__

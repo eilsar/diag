@@ -55,9 +55,16 @@ struct peripheral {
 	struct list_head node;
 };
 
+struct peripheral_plugin {
+	struct peripheral *peripheral;
+	void *handle;
+
+	struct list_head node;
+};
+
 extern struct list_head peripherals;
 
-int peripheral_init();
+int peripheral_init(struct list_head *plugin_names);
 void peripheral_close(struct peripheral *peripheral);
 int peripheral_exit();
 #endif

@@ -66,13 +66,14 @@ static void usage(void)
 	fprintf(stderr,
 		"User space application for diag interface\n"
 		"\n"
-		"usage: diag [-hdgmsu]\n"
+		"usage: diag [-hdgmpsu]\n"
 		"\n"
 		"options:\n"
 		"   -h   show this usage\n"
 		"   -d   show more debug messages\n"
 		"   -g   <gadget device name[#serial number]>\n"
 		"   -m   <debug mask>\n"
+		"   -p   <plugin library path and name>\n"
 		"   -s   <socket address[:port]>\n"
 		"   -u   <uart device name[@baudrate]>\n"
 	);
@@ -93,12 +94,15 @@ int main(int argc, char **argv)
 	char *gadgetdev = NULL;
 	char *gadgetserial = NULL;
 	char *token;
+	struct list_head plugin_names = LIST_INIT(plugin_names);
+	struct plugin_name *plugin;
+	struct list_head *item;
 
 	if (argc == 1)
 		usage();
 
 	for (;;) {
-		c = getopt(argc, argv, "m:hds:u:g:");
+		c = getopt(argc, argv, "m:hds:u:g:p:");
 		if (c < 0)
 			break;
 		switch (c) {
@@ -107,6 +111,12 @@ int main(int argc, char **argv)
 			break;
 		case 'm':
 			diag_dbg_mask = strtoul(optarg, NULL, 16);
+			break;
+		case 'p':
+			plugin = malloc(sizeof(*plugin));
+			plugin->name = strdup(optarg);
+			diag_dbg(DIAG_DBG_MAIN, "Plugin: %s\n", plugin->name);
+			list_add(&plugin_names, &plugin->node);
 			break;
 		case 's':
 			host_address = strtok(strdup(optarg), ":");
@@ -150,7 +160,8 @@ int main(int argc, char **argv)
 		err(1, "failed to connect to client");
 	list_add(&diag_clients, &config.client->node);
 
-	peripheral_init();
+	peripheral_init(&plugin_names);
+
 	diag_router_init();
 
 	diag_dbg(DIAG_DBG_MAIN, "Starting loop\n");
@@ -158,7 +169,13 @@ int main(int argc, char **argv)
 	watch_run();
 
 	diag_router_exit();
+
 	peripheral_exit();
+
+	list_for_each(item, &plugin_names) {
+		plugin = container_of(item, struct plugin_name, node);
+		free(plugin);
+	}
 
 	list_del(&config.client->node);
 

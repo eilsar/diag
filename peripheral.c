@@ -34,6 +34,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
+#include <dlfcn.h>
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -47,12 +48,14 @@
 
 #include "diag_dbg.h"
 #include "diag_cntl.h"
+#include "diag_peripheral_plugin.h"
 #include "list.h"
 #include "peripheral.h"
 #include "util.h"
 #include "watch.h"
 
 struct list_head devnodes = LIST_INIT(devnodes);
+struct list_head plugins = LIST_INIT(plugins);
 struct list_head peripherals = LIST_INIT(peripherals);
 
 struct devnode {
@@ -215,7 +218,7 @@ void peripheral_close(struct peripheral *peripheral)
 	diag_dbg(DIAG_DBG_PERIPHERAL, "Closing each channel\n");
 	for (i = peripheral_ch_type_data; i < MAX_NUM_OF_CH; i++) {
 		ch = &peripheral->channels[i];
-		if (ch->name && ch->fd >= 0) {
+		if (ch->fd >= 0) {
 			watch_remove_fd(ch->fd);
 			diag_dbg(DIAG_DBG_PERIPHERAL, "Closing channel %s fd = %d\n", ch->name, ch->fd);
 			close(ch->fd);
@@ -274,45 +277,103 @@ static int peripheral_data_recv(int fd, void *data)
 	return diag_transport_send(NULL, buf, len, transform);
 }
 
+static void peripheral_plugin_open(struct peripheral_plugin *plugin)
+{
+	int i;
+	char *error;
+	int pipefd[2];
+	struct diag_cmd *dc;
+	struct diag_cmd_registration_entry *entry;
+	struct diag_cmd_registration_table *tbl;
+	void (*diag_get_cmd_registration_table)(struct diag_cmd_registration_table **tbl_ptr);
+	int (*diag_set_pipe)(int fd);
+	int (*diag_set_debug_level)(int level);
+
+	*(void **) (&diag_get_cmd_registration_table) = dlsym(plugin->handle, "diag_get_cmd_registration_table");
+	*(void **) (&diag_set_pipe) = dlsym(plugin->handle, "diag_set_pipe");
+	*(void **) (&diag_set_debug_level) = dlsym(plugin->handle, "diag_set_debug_level");
+
+	if ((error = dlerror()) != NULL)  {
+        warn("Failed loading symbols: %s\n", error);
+		return;
+    }
+
+	(*diag_set_debug_level)(diag_dbg_mask & DIAG_DBG_PLUGIN);
+
+	(*diag_get_cmd_registration_table)(&tbl);
+
+	for (i = 0; i < tbl->hdr.num_of_entries; i++) {
+		entry = &tbl->table[i];
+		dc = malloc(sizeof(*dc));
+		if (!dc)
+			err(1, "malloc failed");
+		memset(dc, 0, sizeof(*dc));
+
+		dc->first = entry->first_cmd;
+		dc->last =  entry->last_cmd;
+		dc->peripheral = plugin->peripheral;
+		dc->cb = (int(*)(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len))entry->cb;
+		list_add(&diag_cmds, &dc->node);
+		diag_dbg(DIAG_DBG_PERIPHERAL, "imported cmd = 0x%X  cb = 0x%p\n", dc->first, dc->cb);
+	}
+
+	pipe(pipefd);
+	(*diag_set_pipe)(pipefd[1]);
+	plugin->peripheral->channels[peripheral_ch_type_data].fd = pipefd[0];
+}
+
 static void peripheral_open(struct peripheral *peripheral)
 {
 	int i;
 	int fd = -1;
 	struct channel *ch;
+	struct list_head *item;
+	struct peripheral_plugin *plugin = NULL;
 	int ret;
 
 	if (peripheral == NULL)
 		return;
 
+	diag_dbg(DIAG_DBG_PERIPHERAL, "Opening peripheral %s\n", peripheral->name);
+	list_for_each(item, &plugins) {
+		plugin = container_of(item, struct peripheral_plugin, node);
+		if (plugin->peripheral == peripheral) {
+			diag_dbg(DIAG_DBG_PERIPHERAL, "Peripheral %s is a plugin\n", peripheral->name);
+			peripheral_plugin_open(plugin);
+			break;
+		}
+	}
 	for (i = peripheral_ch_type_data; i < MAX_NUM_OF_CH; i++) {
 		ch = &peripheral->channels[i];
-		if (ch->name && ch->fd < 0) {
-			fd = devnode_open(peripheral->name, ch->name);
-			if (fd >= 0) {
-				ch->fd = fd;
-				diag_dbg(DIAG_DBG_PERIPHERAL, "Opened on device %s channel %s with fd = %d\n", peripheral->name, ch->name, ch->fd);
-				switch (i) {
-				case peripheral_ch_type_data:
-					ret = fcntl(ch->fd, F_SETFL, O_NONBLOCK);
-					if (ret < 0)
-						warn("failed to turn %s non blocking", ch->name);
-					watch_add_writeq(ch->fd, &ch->queue);
-					watch_add_readfd(ch->fd, peripheral_data_recv, peripheral);
-					break;
-				case peripheral_ch_type_ctrl:
-					watch_add_writeq(ch->fd, &ch->queue);
-					watch_add_readfd(ch->fd, diag_cntl_recv, peripheral);
-					break;
-				case peripheral_ch_type_cmd:
-					watch_add_writeq(ch->fd, &ch->queue);
-					watch_add_readfd(ch->fd, peripheral_cmd_recv, peripheral);
-					break;
-				default:
+		if (ch->name) { // Channel defined
+			if (ch->fd < 0) { // Channel not open
+				fd = devnode_open(peripheral->name, ch->name);
+				if (fd >= 0)
+					ch->fd = fd;
+				else {
+					warn("failed to open %s channel closing peripheral %s", ch->name, peripheral->name);
+					peripheral_close(peripheral);
 					break;
 				}
-			} else {
-				warn("failed to open %s channel closing peripheral %s", ch->name, peripheral->name);
-				peripheral_close(peripheral);
+			}
+			diag_dbg(DIAG_DBG_PERIPHERAL, "Opened on device %s channel %s with fd = %d\n", peripheral->name, ch->name, ch->fd);
+			ret = fcntl(ch->fd, F_SETFL, fcntl(ch->fd, F_GETFL, 0) | O_NONBLOCK);
+			if (ret < 0)
+				warn("failed to turn %s non blocking", ch->name);
+			switch (i) {
+			case peripheral_ch_type_data:
+				watch_add_writeq(ch->fd, &ch->queue);
+				watch_add_readfd(ch->fd, peripheral_data_recv, peripheral);
+				break;
+			case peripheral_ch_type_cmd:
+				watch_add_writeq(ch->fd, &ch->queue);
+				watch_add_readfd(ch->fd, peripheral_cmd_recv, peripheral);
+				break;
+			case peripheral_ch_type_ctrl:
+				watch_add_writeq(ch->fd, &ch->queue);
+				watch_add_readfd(ch->fd, diag_cntl_recv, peripheral);
+				break;
+			default:
 				break;
 			}
 		}
@@ -359,6 +420,7 @@ static struct peripheral *peripheral_create(const char *name)
 	peripheral->name = strdup(name);
 	list_add(&peripherals, &peripheral->node);
 
+	diag_dbg(DIAG_DBG_PERIPHERAL, "peripheral %s added to list\n", peripheral->name);
 	return peripheral;
 }
 
@@ -388,6 +450,32 @@ static int peripheral_set_channel(struct peripheral *peripheral,
 	}
 
 	return 1;
+}
+
+static void peripheral_plugin_destroy(struct peripheral_plugin *plugin)
+{
+	list_del(&plugin->node);
+	plugin->handle = NULL;
+	free(plugin);
+}
+
+static struct peripheral *peripheral_plugin_create(const char* name)
+{
+	struct peripheral_plugin *plugin = (struct peripheral_plugin *) malloc(sizeof(struct peripheral_plugin));
+	plugin->peripheral = peripheral_create(name);
+	plugin->handle = dlopen(name, RTLD_LAZY);
+	if (!plugin->handle) {
+		peripheral_plugin_destroy(plugin);
+		warn("Failed to open plugin handle: %s\n", dlerror());
+		return NULL;
+	}
+
+    dlerror();    /* Clear any existing error */
+
+	list_add(&plugins, &plugin->node);
+
+	diag_dbg(DIAG_DBG_PERIPHERAL, "plugin %s created\n", plugin->peripheral->name);
+    return plugin->peripheral;
 }
 
 static int peripheral_udev_update(int fd, void *data)
@@ -436,10 +524,11 @@ unref_dev:
 	return 0;
 }
 
-int peripheral_init()
+int peripheral_init(struct list_head *plugin_names)
 {
 	struct list_head *item;
 	struct peripheral *peripheral;
+	struct plugin_name *plugin;
 
 	peripheral_udev_init();
 
@@ -452,8 +541,17 @@ int peripheral_init()
 	peripheral_set_channel(peripheral, "APPS_RIVA_DATA", peripheral_ch_type_data);
 	peripheral_set_channel(peripheral, "APPS_RIVA_CTRL", peripheral_ch_type_ctrl);
 
+	if (plugin_names) {
+		list_for_each(item, plugin_names) {
+			plugin = container_of(item, struct plugin_name, node);
+			peripheral = peripheral_plugin_create(plugin->name);
+			peripheral_set_channel(peripheral, "RESPONSE", peripheral_ch_type_data);
+		}
+	}
+
 	list_for_each(item, &peripherals) {
 		peripheral = container_of(item, struct peripheral, node);
+		diag_dbg(DIAG_DBG_PERIPHERAL, "open peripheral %s\n", peripheral->name);
 		peripheral_open(peripheral);
 	}
 
@@ -464,11 +562,18 @@ int peripheral_exit()
 {
 	struct list_head *item;
 	struct peripheral *peripheral;
+	struct peripheral_plugin *plugin;
 
 	/* Destroy each device */
 	list_for_each(item, &peripherals) {
 		peripheral = container_of(item, struct peripheral, node);
 		peripheral_destroy(peripheral);
+	}
+
+	/* Destroy each plugin */
+	list_for_each(item, &plugins) {
+		plugin = container_of(item, struct peripheral_plugin, node);
+		peripheral_plugin_destroy(plugin);
 	}
 
 	return 0;
