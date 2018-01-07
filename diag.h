@@ -51,7 +51,8 @@
 
 struct diag_client {
 	const char *name;
-	int fd;
+	int in_fd;
+	int out_fd;
 	struct list_head outq;
 
 	struct list_head node;
@@ -82,6 +83,8 @@ struct diag_transport_config {
 	unsigned short port;
 	const char *uartname;
 	unsigned int baudrate;
+	const char* gadgetname;
+	const char* gadgetserial;
 	struct diag_client *client;
 };
 

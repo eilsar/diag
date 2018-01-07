@@ -230,11 +230,12 @@ static void usage(void)
 	fprintf(stderr,
 		"User space application for diag interface\n"
 		"\n"
-		"usage: diag [-hdmsu]\n"
+		"usage: diag [-hdgmsu]\n"
 		"\n"
 		"options:\n"
 		"   -h   show this usage\n"
 		"   -d   show more debug messages\n"
+		"   -g   <gadget device name[#serial number]>\n"
 		"   -m   <debug mask>\n"
 		"   -s   <socket address[:port]>\n"
 		"   -u   <uart device name[@baudrate]>\n"
@@ -253,13 +254,15 @@ int main(int argc, char **argv)
 	int host_port = DEFAULT_SOCKET_PORT;
 	char *uartdev = "";
 	int baudrate = DEFAULT_BAUD_RATE;
+	char *gadgetdev = NULL;
+	char *gadgetserial = NULL;
 	char *token;
 
 	if (argc == 1)
 		usage();
 
 	for (;;) {
-		c = getopt(argc, argv, "m:hds:u:");
+		c = getopt(argc, argv, "m:hds:u:g:");
 		if (c < 0)
 			break;
 		switch (c) {
@@ -281,6 +284,10 @@ int main(int argc, char **argv)
 			if (token)
 				baudrate = atoi(token);
 			break;
+		case 'g':
+			gadgetdev = strtok(strdup(optarg), "#");
+			gadgetserial = strtok(NULL, "");
+			break;
 		default:
 		case 'h':
 			usage();
@@ -298,6 +305,9 @@ int main(int argc, char **argv)
 
 	config.uartname = uartdev;
 	config.baudrate = baudrate;
+
+	config.gadgetname = gadgetdev;
+	config.gadgetserial = gadgetserial;
 
 	ret = diag_transport_init(&config);
 	if (ret < 0)

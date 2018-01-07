@@ -58,9 +58,9 @@ static int diag_transport_recv(int fd, void* data)
 	size_t len;
 	ssize_t n;
 
-	n = read(client->fd, buf, sizeof(buf));
+	n = read(client->in_fd, buf, sizeof(buf));
 	if ((n < 0) && (errno != EAGAIN)) {
-		warn("Failed to read from fd=%d\n", client->fd);
+		warn("Failed to read from fd=%d\n", client->in_fd);
 		return n;
 	}
 
@@ -81,7 +81,7 @@ static int diag_transport_recv(int fd, void* data)
 
 int diag_transport_init(struct diag_transport_config *dtc)
 {
-	int ret = -1;
+	int ret;
 
 	config = dtc;
 	config->client = malloc(sizeof(struct diag_client));
@@ -91,25 +91,33 @@ int diag_transport_init(struct diag_transport_config *dtc)
 		ret = diag_sock_connect(config->hostname, config->port);
 	else if (config->uartname)
 		ret = diag_uart_connect(config->uartname, config->baudrate);
-	else
-		warn("no configured connection mode\n");
-	if (ret < 0)
+	else // if (config->gadgetname) // uncomment to not make USB default
+		ret = diag_usb_connect(config->gadgetname, config->gadgetserial, &config->client->in_fd, &config->client->out_fd, "", "");
+	if (ret < 0) {
+		warn("failed to connect to client");
+		free(config->client);
+		config->client = NULL;
 		return ret;
+	}
 
-	config->client->fd = ret;
+	if (config->hostname || config->uartname) {
+		config->client->in_fd = config->client->out_fd = ret;
+	}
+
 	config->client->name = strdup("HOST PC");
-	diag_dbg(DIAG_DBG_TRANSPORT, "Established fd=%d, name=%s\n",
-			config->client->fd, config->client->name);
+	diag_dbg(DIAG_DBG_TRANSPORT, "Established in_fd=%d, out_fd=%d, name=%s\n",
+			config->client->in_fd, config->client->out_fd, config->client->name);
 
-	watch_add_readfd(config->client->fd, diag_transport_recv, config->client);
-	watch_add_writeq(config->client->fd, &config->client->outq);
+	watch_add_readfd(config->client->in_fd, diag_transport_recv, config->client);
+	watch_add_writeq(config->client->out_fd, &config->client->outq);
 
 	return 0;
 }
 
 int diag_transport_exit()
 {
-	watch_remove_fd(config->client->fd);
+	watch_remove_fd(config->client->in_fd);
+	watch_remove_fd(config->client->out_fd);
 	free(config->client);
 	config->client = NULL;
 	config = NULL;
