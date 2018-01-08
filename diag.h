@@ -79,6 +79,9 @@
 #define DIAG_CMD_DIAG_VERSION_ID					28
 #define DIAG_CMD_DIAG_VERSION_KEY get_diag_cmd_key(DIAG_CMD_DIAG_VERSION_ID)
 
+#define DIAG_CMD_LOGGING_CONFIGURATION 				0x73
+#define DIAG_CMD_LOGGING_CONFIGURATION_KEY get_diag_cmd_key(DIAG_CMD_LOGGING_CONFIGURATION)
+
 struct diag_client {
 	const char *name;
 	int in_fd;

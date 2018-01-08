@@ -182,6 +182,183 @@ int diag_cmd_forward_to_peripheral(struct diag_cmd *dc, struct diag_client *clie
 	return 0;
 }
 
+struct diag_log_cmd_mask {
+	uint32_t equip_id;
+	uint32_t num_items;
+	uint8_t mask[0];
+}__packed;
+
+#define DIAG_CMD_OP_LOG_DISABLE		0
+#define DIAG_CMD_OP_GET_LOG_RANGE	1
+#define DIAG_CMD_OP_SET_LOG_MASK	3
+#define DIAG_CMD_OP_GET_LOG_MASK	4
+
+#define DIAG_CMD_STATUS_SUCCESS					0
+#define DIAG_CMD_STATUS_INVALID_EQUIPMENT_ID	1
+
+static int send_packet(struct diag_client *client, void *buf, size_t len, uint8_t transform)
+{
+	struct mbuf *resp_packet = create_packet(buf, len, transform);
+
+	if (resp_packet == NULL) {
+		warn("failed to create packet");
+
+		return -1;
+	}
+
+	queue_push(&client->outq, resp_packet);
+
+	return 0;
+}
+
+static int diag_router_handle_logging_configuration_response(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len)
+{
+	struct diag_log_cmd_header {
+		uint8_t cmd_code;
+		uint8_t reserved[3];
+		uint32_t operation;
+	}__packed *request_header = buf;
+	struct list_head *item;
+	struct peripheral *peripheral;
+	int ret;
+
+	switch (request_header->operation) {
+	case DIAG_CMD_OP_LOG_DISABLE: {
+		struct {
+			struct diag_log_cmd_header header;
+			uint32_t status;
+		} __packed resp;
+
+		if (sizeof(*request_header) != len) {
+			return diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_LENGTH);
+		}
+
+		memcpy(&resp, request_header, sizeof(*request_header));
+		diag_cmd_disable_log();
+		resp.status = DIAG_CMD_STATUS_SUCCESS;
+
+		list_for_each(item, &peripherals) {
+			peripheral = container_of(item, struct peripheral, node);
+			diag_cntl_send_log_mask(peripheral, 0); // equip_id is ignored
+		}
+
+		ret = send_packet(client, (uint8_t *)&resp, sizeof(resp), ENCODE);
+		break;
+	}
+	case DIAG_CMD_OP_GET_LOG_RANGE: {
+		struct {
+			struct diag_log_cmd_header header;
+			uint32_t status;
+			uint32_t ranges[MAX_EQUIP_ID];
+		} __packed resp;
+
+		if (sizeof(*request_header) != len) {
+			return diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_LENGTH);
+		}
+
+		memcpy(&resp, request_header, sizeof(*request_header));
+		diag_cmd_get_log_range(resp.ranges, MAX_EQUIP_ID);
+		resp.status = DIAG_CMD_STATUS_SUCCESS;
+
+		ret = send_packet(client, (uint8_t *)&resp, sizeof(resp), ENCODE);
+
+		break;
+	}
+	case DIAG_CMD_OP_SET_LOG_MASK: {
+		struct diag_log_cmd_mask *mask_to_set = (struct diag_log_cmd_mask*)(buf + sizeof(struct diag_log_cmd_header));
+		struct {
+			struct diag_log_cmd_header header;
+			uint32_t status;
+			struct diag_log_cmd_mask mask_structure;
+		} __packed *resp;
+		uint32_t resp_size = sizeof(*resp);
+		uint32_t mask_size = sizeof(*mask_to_set) + LOG_ITEMS_TO_SIZE(mask_to_set->num_items);
+
+		if (sizeof(*request_header) + mask_size != len) {
+			return diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_LENGTH);
+		}
+
+		resp_size += mask_size;
+		if (posix_memalign((void **)&resp, PACKET_ALLOC_ALIGNMENT, resp_size)) {
+			warn("Failed to allocate response packet\n");
+			return -errno;
+		}
+		memcpy(resp, request_header, sizeof(*request_header));
+		diag_dbg(DIAG_DBG_ROUTER, "Request: equip_id=%u num_items=%u\n", mask_to_set->equip_id, mask_to_set->num_items);
+		diag_cmd_set_log_mask(mask_to_set->equip_id, &mask_to_set->num_items, mask_to_set->mask, &mask_size);
+		memcpy(&resp->mask_structure, mask_to_set, mask_size); // num_items might have been capped!!!
+		resp->status = DIAG_CMD_STATUS_SUCCESS;
+
+		list_for_each(item, &peripherals) {
+			peripheral = container_of(item, struct peripheral, node);
+			diag_cntl_send_log_mask(peripheral, resp->mask_structure.equip_id);
+		}
+
+		ret = send_packet(client, resp, resp_size, ENCODE);
+		free(resp);
+
+		break;
+	}
+	case DIAG_CMD_OP_GET_LOG_MASK: {
+		uint32_t *equip_id = (uint32_t *)(buf + sizeof(struct diag_log_cmd_header));
+		struct get_log_response_resp {
+			struct diag_log_cmd_header header;
+			uint32_t status;
+			struct diag_log_cmd_mask mask_structure;
+		} __packed *resp;
+		uint32_t num_items = 0;
+		uint8_t *mask;
+		uint32_t mask_size = 0;
+		uint32_t resp_size = sizeof(*resp);
+
+		if (sizeof(*request_header) + sizeof(*equip_id) != len) {
+			return diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_LENGTH);
+		}
+
+		if (diag_cmd_get_log_mask(*equip_id, &num_items, &mask, &mask_size) == 0) {
+			resp_size += mask_size;
+			if (posix_memalign((void **)&resp, PACKET_ALLOC_ALIGNMENT, resp_size)) {
+				warn("Failed to allocate response packet\n");
+				return -errno;
+			}
+			memcpy(resp, request_header, sizeof(*request_header));
+			resp->mask_structure.equip_id = *equip_id;
+			resp->mask_structure.num_items = num_items;
+			if (mask != NULL) {
+				memcpy(&resp->mask_structure.mask, mask, mask_size);
+				free(mask);
+			}
+			resp->status = DIAG_CMD_STATUS_SUCCESS;
+		} else {
+			if (posix_memalign((void **)&resp, PACKET_ALLOC_ALIGNMENT, resp_size)) {
+				warn("Failed to allocate response packet\n");
+				return -errno;
+			}
+			memcpy(resp, request_header, sizeof(*request_header));
+			resp->mask_structure.equip_id = *equip_id;
+			resp->mask_structure.num_items = num_items;
+			resp->status = DIAG_CMD_STATUS_INVALID_EQUIPMENT_ID;
+		}
+
+		list_for_each(item, &peripherals) {
+			peripheral = container_of(item, struct peripheral, node);
+			diag_cntl_send_log_mask(peripheral, resp->mask_structure.equip_id);
+		}
+
+		ret = send_packet(client, resp, resp_size, ENCODE);
+		free(resp);
+
+		break;
+	}
+	default:
+		warn("Unrecognized operation %d!!!", request_header->operation);
+		ret = diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_PARAMS);
+		break;
+	}
+
+	return ret;
+}
+
 static void diag_router_send_msg_mask_to_all()
 {
 	int i;
@@ -301,6 +478,7 @@ static int diag_cmds_init()
 	register_diag_cmd(DIAG_CMD_DIAG_VERSION_KEY, diag_router_handle_diag_version, &apps_cmds);
 	register_diag_cmd(DIAG_CMD_EXTENDED_BUILD_ID_KEY, diag_router_handle_extended_build_id, &apps_cmds);
 
+	register_diag_cmd(DIAG_CMD_LOGGING_CONFIGURATION_KEY, diag_router_handle_logging_configuration_response, &common_cmds);
 	return 0;
 }
 
