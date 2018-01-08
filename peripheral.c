@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
  * Copyright (c) 2016, Linaro Ltd.
  * All rights reserved.
  *
@@ -224,6 +224,56 @@ void peripheral_close(struct peripheral *peripheral)
 	}
 }
 
+static int peripheral_cmd_recv(int fd, void *data)
+{
+	struct peripheral *peripheral = data;
+	uint8_t buf[APPS_BUF_SIZE];
+	size_t len;
+	ssize_t n;
+	uint8_t transform;
+
+	diag_dbg(DIAG_DBG_PERIPHERAL, "Reading response from %s\n", peripheral->name);
+	n = read(fd, buf, sizeof(buf));
+	if (n < 0) {
+		if (errno != EAGAIN) {
+			warn("failed to read from cmd channel");
+			peripheral_close(peripheral);
+			return -1;
+		}
+		return 0;
+	}
+
+	len = n;
+	transform = peripheral->features & DIAG_FEATURE_APPS_HDLC_ENCODE ? KEEP_AS_IS : ENCODE;
+
+	return diag_transport_send(NULL, buf, len, transform);
+}
+
+static int peripheral_data_recv(int fd, void *data)
+{
+	struct peripheral *peripheral = data;
+	uint8_t buf[APPS_BUF_SIZE];
+	size_t len;
+	ssize_t n;
+	uint8_t transform;
+
+	diag_dbg(DIAG_DBG_PERIPHERAL, "Reading response from %s\n", peripheral->name);
+	n = read(fd, buf, sizeof(buf));
+	if (n < 0) {
+		if (errno != EAGAIN) {
+			warn("failed to read from data channel");
+			peripheral_close(peripheral);
+			return -1;
+		}
+		return 0;
+	}
+
+	len = n;
+	transform = peripheral->features & DIAG_FEATURE_APPS_HDLC_ENCODE ? KEEP_AS_IS : ENCODE;
+
+	return diag_transport_send(NULL, buf, len, transform);
+}
+
 static void peripheral_open(struct peripheral *peripheral)
 {
 	int i;
@@ -247,7 +297,7 @@ static void peripheral_open(struct peripheral *peripheral)
 					if (ret < 0)
 						warn("failed to turn %s non blocking", ch->name);
 					watch_add_writeq(ch->fd, &ch->queue);
-					watch_add_readfd(ch->fd, diag_data_recv, peripheral);
+					watch_add_readfd(ch->fd, peripheral_data_recv, peripheral);
 					break;
 				case peripheral_ch_type_ctrl:
 					watch_add_writeq(ch->fd, &ch->queue);
@@ -255,7 +305,7 @@ static void peripheral_open(struct peripheral *peripheral)
 					break;
 				case peripheral_ch_type_cmd:
 					watch_add_writeq(ch->fd, &ch->queue);
-					watch_add_readfd(ch->fd, diag_cmd_recv, peripheral);
+					watch_add_readfd(ch->fd, peripheral_cmd_recv, peripheral);
 					break;
 				default:
 					break;
@@ -286,7 +336,7 @@ static struct peripheral *peripheral_get_by_name(const char* name)
 	return NULL;
 }
 
-static struct peripheral* peripheral_create(const char *name)
+static struct peripheral *peripheral_create(const char *name)
 {
 	struct peripheral *peripheral;
 	int i;

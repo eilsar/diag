@@ -61,55 +61,6 @@ unsigned int diag_dbg_mask = DIAG_DBG_NONE;
 struct list_head diag_cmds = LIST_INIT(diag_cmds);
 struct list_head diag_clients = LIST_INIT(diag_clients);
 
-int diag_cmd_recv(int fd, void *data)
-{
-	struct peripheral *peripheral = data;
-	uint8_t buf[APPS_BUF_SIZE];
-	ssize_t n;
-
-	n = read(fd, buf, sizeof(buf));
-	if (n < 0) {
-		if (errno != EAGAIN) {
-			warn("failed to read from cmd channel");
-			peripheral_close(peripheral);
-		}
-	}
-
-	return 0;
-}
-
-int diag_data_recv(int fd, void *data)
-{
-	struct peripheral *peripheral = data;
-	struct diag_client *client;
-	struct list_head *item;
-	uint8_t buf[APPS_BUF_SIZE];
-	size_t len;
-	ssize_t n;
-	struct mbuf *packet;
-
-	for (;;) {
-		n = read(fd, buf, sizeof(buf));
-		if (n < 0) {
-			if (errno != EAGAIN) {
-				warn("failed to read from data channel");
-				peripheral_close(peripheral);
-			}
-			break;
-		}
-
-		len = n;
-
-		packet = create_packet(buf, len, (peripheral->features & DIAG_FEATURE_APPS_HDLC_ENCODE) ? ENCODE : KEEP_AS_IS);
-		list_for_each(item, &diag_clients) {
-			client = container_of(item, struct diag_client, node);
-			queue_push(&client->outq, packet);
-		}
-	}
-
-	return 0;
-}
-
 static void usage(void)
 {
 	fprintf(stderr,
