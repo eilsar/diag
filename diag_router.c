@@ -205,6 +205,9 @@ struct diag_log_cmd_mask {
 #define DIAG_CMD_MSG_STATUS_UNSUCCESSFUL		0
 #define DIAG_CMD_MSG_STATUS_SUCCESSFUL			1
 
+#define DIAG_CMD_EVENT_ERROR_CODE_OK			0
+#define DIAG_CMD_EVENT_ERROR_CODE_FAIL			1
+
 static int send_packet(struct diag_client *client, void *buf, size_t len, uint8_t transform)
 {
 	struct mbuf *resp_packet = create_packet(buf, len, transform);
@@ -597,6 +600,62 @@ static int diag_router_handle_extended_message_configuration_response(struct dia
 	return ret;
 }
 
+static int diag_router_handle_event_get_mask_response(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len)
+{
+	struct {
+		uint8_t cmd_code;
+		uint8_t pad;
+		uint16_t reserved;
+	} __packed *req = buf;
+	struct {
+		uint8_t cmd_code;
+		uint8_t error_code;
+		uint16_t reserved;
+		uint16_t num_bits;
+		uint8_t mask[0];
+	} __packed *resp;
+	uint32_t resp_size = sizeof(*resp);
+	uint16_t num_bits = event_max_num_bits;
+	uint16_t mask_size = 0;
+	uint8_t *mask = NULL;
+	int ret;
+
+	if (sizeof(*req) != len) {
+		return diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_LENGTH);
+	}
+
+	if (diag_cmd_get_event_mask(num_bits, &mask) == 0) {
+		mask_size = EVENT_COUNT_TO_BYTES(num_bits);
+		resp_size += mask_size;
+		if (posix_memalign((void **)&resp, PACKET_ALLOC_ALIGNMENT, resp_size)) {
+			warn("Failed to allocate response packet\n");
+			return -errno;
+		}
+		resp->cmd_code = req->cmd_code;
+		resp->reserved = req->reserved;
+		resp->num_bits = num_bits;
+		if (mask != NULL) {
+			memcpy(&resp->mask, mask, mask_size);
+			free(mask);
+		}
+		resp->error_code = DIAG_CMD_EVENT_ERROR_CODE_OK;
+	} else {
+		if (posix_memalign((void **)&resp, PACKET_ALLOC_ALIGNMENT, resp_size)) {
+			warn("Failed to allocate response packet\n");
+			return -errno;
+		}
+		resp->cmd_code = req->cmd_code;
+		resp->reserved = req->reserved;
+		resp->num_bits = 0;
+		resp->error_code = DIAG_CMD_EVENT_ERROR_CODE_FAIL;
+	}
+
+	ret = send_packet(client, (uint8_t *)resp, resp_size, ENCODE);
+	free(resp);
+
+	return ret;
+}
+
 static void diag_router_send_msg_mask_to_all()
 {
 	int i;
@@ -718,6 +777,8 @@ static int diag_cmds_init()
 
 	register_diag_cmd(DIAG_CMD_LOGGING_CONFIGURATION_KEY, diag_router_handle_logging_configuration_response, &common_cmds);
 	register_diag_cmd(DIAG_CMD_EXTENDED_MESSAGE_CONFIGURATION_KEY, diag_router_handle_extended_message_configuration_response, &common_cmds);
+	register_diag_cmd(DIAG_CMD_GET_MASK_KEY, diag_router_handle_event_get_mask_response, &common_cmds);
+
 	return 0;
 }
 
