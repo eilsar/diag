@@ -38,6 +38,8 @@
 #include "mbuf.h"
 #include "peripheral.h"
 
+#define PACKET_ALLOC_ALIGNMENT sizeof(void *)
+
 #define BIT(x) (1 << (x))
 
 #define DIAG_FEATURE_FEATURE_MASK_SUPPORT	BIT(0)
