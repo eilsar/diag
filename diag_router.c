@@ -196,6 +196,15 @@ struct diag_log_cmd_mask {
 #define DIAG_CMD_STATUS_SUCCESS					0
 #define DIAG_CMD_STATUS_INVALID_EQUIPMENT_ID	1
 
+#define DIAG_CMD_OP_GET_SSID_RANGE	1
+#define DIAG_CMD_OP_GET_BUILD_MASK	2
+#define DIAG_CMD_OP_GET_MSG_MASK	3
+#define DIAG_CMD_OP_SET_MSG_MASK	4
+#define DIAG_CMD_OP_SET_ALL_MSG_MASK	5
+
+#define DIAG_CMD_MSG_STATUS_UNSUCCESSFUL		0
+#define DIAG_CMD_MSG_STATUS_SUCCESSFUL			1
+
 static int send_packet(struct diag_client *client, void *buf, size_t len, uint8_t transform)
 {
 	struct mbuf *resp_packet = create_packet(buf, len, transform);
@@ -359,6 +368,235 @@ static int diag_router_handle_logging_configuration_response(struct diag_cmd *dc
 	return ret;
 }
 
+static int diag_router_handle_extended_message_configuration_response(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len)
+{
+	struct diag_msg_cmd_header {
+		uint8_t cmd_code;
+		uint8_t operation;
+	}__packed *request_header = buf;
+	struct list_head *item;
+	struct peripheral *peripheral;
+	int ret;
+
+	switch (request_header->operation) {
+	case DIAG_CMD_OP_GET_SSID_RANGE: {
+		struct {
+			struct diag_msg_cmd_header header;
+			uint8_t status;
+			uint8_t reserved;
+			uint32_t range_cnt;
+			struct diag_ssid_range_t ranges[];
+		} __packed *resp;
+		uint32_t resp_size = sizeof(*resp);
+		uint32_t count = 0;
+		struct diag_ssid_range_t *ranges = NULL;
+		uint32_t ranges_size = 0;
+
+		if (sizeof(*request_header) != len) {
+			return diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_LENGTH);
+		}
+
+		diag_cmd_get_ssid_range(&count, &ranges);
+		ranges_size = count * sizeof(*ranges);
+		resp_size += ranges_size;
+		if (posix_memalign((void **)&resp, PACKET_ALLOC_ALIGNMENT, resp_size)) {
+			warn("Failed to allocate response packet\n");
+			return -errno;
+		}
+		memcpy(resp, request_header, sizeof(*request_header));
+		resp->range_cnt = count;
+		if (ranges != NULL) {
+			memcpy(resp->ranges, ranges, ranges_size);
+			free(ranges);
+		}
+		resp->status = DIAG_CMD_MSG_STATUS_SUCCESSFUL;
+
+		ret = send_packet(client, (uint8_t *)resp, resp_size, ENCODE);
+		free(resp);
+
+		break;
+	}
+	case DIAG_CMD_OP_GET_BUILD_MASK: {
+		struct diag_ssid_range_t *range = (struct diag_ssid_range_t *)(buf + sizeof(struct diag_msg_cmd_header));
+		struct {
+			struct diag_msg_cmd_header header;
+			uint8_t status;
+			uint8_t reserved;
+			uint32_t bld_masks[];
+		} __packed *resp;
+		uint32_t resp_size = sizeof(*resp);
+		uint32_t *masks = NULL;
+		uint32_t masks_size = 0;
+
+		if (sizeof(*request_header) + sizeof(*range) != len) {
+			return diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_LENGTH);
+		}
+
+		if (diag_cmd_get_build_mask(range, &masks) == 0) {
+			masks_size = MSG_RANGE_TO_SIZE(*range);
+			resp_size += masks_size;
+			if (posix_memalign((void **)&resp, PACKET_ALLOC_ALIGNMENT, resp_size)) {
+				warn("Failed to allocate response packet\n");
+				return -errno;
+			}
+			memcpy(resp, request_header, sizeof(*request_header));
+			if (masks != NULL) {
+				memcpy(resp->bld_masks, masks, masks_size);
+				free(masks);
+			}
+			resp->status = DIAG_CMD_MSG_STATUS_SUCCESSFUL;
+		} else {
+			if (posix_memalign((void **)&resp, PACKET_ALLOC_ALIGNMENT, resp_size)) {
+				warn("Failed to allocate response packet\n");
+				return -errno;
+			}
+			memcpy(resp, request_header, sizeof(*request_header));
+			resp->status = DIAG_CMD_MSG_STATUS_UNSUCCESSFUL;
+		}
+
+		ret = send_packet(client, (uint8_t *)resp, resp_size, ENCODE);
+		free(resp);
+
+		break;
+	}
+	case DIAG_CMD_OP_GET_MSG_MASK: {
+		struct diag_ssid_range_t *range = buf + sizeof(struct diag_msg_cmd_header);
+		struct {
+			struct diag_msg_cmd_header header;
+			uint8_t status;
+			uint8_t rsvd;
+			uint32_t rt_masks[];
+		} __packed *resp;
+		uint32_t resp_size = sizeof(*resp);
+		uint32_t *masks = NULL;
+		uint32_t masks_size = 0;
+
+		if (sizeof(*request_header) + sizeof(*range) != len) {
+			return diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_LENGTH);
+		}
+
+		if (diag_cmd_get_msg_mask(range, &masks) == 0) {
+			masks_size = MSG_RANGE_TO_SIZE(*range);
+			resp_size += masks_size;
+			if (posix_memalign((void **)&resp, PACKET_ALLOC_ALIGNMENT, resp_size)) {
+				warn("Failed to allocate response packet\n");
+				return -errno;
+			}
+			memcpy(resp, request_header, sizeof(*request_header));
+			if (masks != NULL) {
+				memcpy(resp->rt_masks, masks, masks_size);
+				free(masks);
+			}
+			resp->status = DIAG_CMD_MSG_STATUS_SUCCESSFUL;
+		} else {
+			if (posix_memalign((void **)&resp, PACKET_ALLOC_ALIGNMENT, resp_size)) {
+				warn("Failed to allocate response packet\n");
+				return -errno;
+			}
+			memcpy(resp, request_header, sizeof(*request_header));
+			resp->status = DIAG_CMD_MSG_STATUS_UNSUCCESSFUL;
+		}
+
+		ret = send_packet(client, resp, resp_size, ENCODE);
+		free(resp);
+
+		break;
+	}
+	case DIAG_CMD_OP_SET_MSG_MASK: {
+		struct {
+			struct diag_msg_cmd_header header;
+			struct diag_ssid_range_t range;
+			uint8_t rsvd;
+			uint32_t masks[];
+		} __packed *req = buf;
+		struct {
+			struct diag_msg_cmd_header header;
+			struct diag_ssid_range_t range;
+			uint8_t status;
+			uint8_t rsvd;
+			uint32_t rt_masks[0];
+		} __packed *resp;
+		uint32_t resp_size = sizeof(*resp);
+		uint32_t masks_size = MSG_RANGE_TO_SIZE(req->range);
+
+		if (sizeof(*req) + masks_size != len) {
+			return diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_LENGTH);
+		}
+
+		if (diag_cmd_set_msg_mask(req->range, req->masks) == 0) {
+			resp_size += masks_size;
+			if (posix_memalign((void **)&resp, PACKET_ALLOC_ALIGNMENT, resp_size)) {
+				warn("Failed to allocate response packet\n");
+				return -errno;
+			}
+			resp->header = req->header;
+			resp->range = req->range;
+			resp->rsvd = req->rsvd;
+			if (req->masks != NULL) {
+				memcpy(resp->rt_masks, req->masks, masks_size);
+			}
+			resp->status = DIAG_CMD_MSG_STATUS_SUCCESSFUL;
+
+			list_for_each(item, &peripherals) {
+				peripheral = container_of(item, struct peripheral, node);
+				diag_cntl_send_msg_mask(peripheral, &resp->range);
+			}
+		} else {
+			if (posix_memalign((void **)&resp, PACKET_ALLOC_ALIGNMENT, resp_size)) {
+				warn("Failed to allocate response packet\n");
+				return -errno;
+			}
+			resp->header = req->header;
+			resp->range = req->range;
+			resp->rsvd = req->rsvd;
+			resp->status = DIAG_CMD_MSG_STATUS_UNSUCCESSFUL;
+		}
+
+		ret = send_packet(client, (uint8_t *)resp, resp_size, ENCODE);
+		free(resp);
+
+		break;
+	}
+	case DIAG_CMD_OP_SET_ALL_MSG_MASK: {
+		struct {
+			struct diag_msg_cmd_header header;
+			uint8_t rsvd;
+			uint32_t mask;
+		} __packed *req = buf;
+		struct {
+			struct diag_msg_cmd_header header;
+			uint8_t status;
+			uint8_t rsvd;
+			uint32_t rt_mask;
+		} __packed resp;
+
+		if (sizeof(*req) != len) {
+			return diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_LENGTH);
+		}
+
+		diag_cmd_set_all_msg_mask(req->mask);
+		resp.header = req->header;
+		resp.rsvd = req->rsvd;
+		resp.rt_mask = req->mask;
+		resp.status = DIAG_CMD_MSG_STATUS_SUCCESSFUL;
+
+		list_for_each(item, &peripherals) {
+			peripheral = container_of(item, struct peripheral, node);
+			diag_cntl_send_msg_mask(peripheral, NULL); // range is ignored
+		}
+
+		ret = send_packet(client, (uint8_t *)&resp, sizeof(resp), ENCODE);
+		break;
+	}
+	default:
+		warn("Unrecognized operation %d!!!", request_header->operation);
+		ret = diag_rsp_bad_command(client, buf, len, DIAG_CMD_RSP_BAD_PARAMS);
+		break;
+	}
+
+	return ret;
+}
+
 static void diag_router_send_msg_mask_to_all()
 {
 	int i;
@@ -479,6 +717,7 @@ static int diag_cmds_init()
 	register_diag_cmd(DIAG_CMD_EXTENDED_BUILD_ID_KEY, diag_router_handle_extended_build_id, &apps_cmds);
 
 	register_diag_cmd(DIAG_CMD_LOGGING_CONFIGURATION_KEY, diag_router_handle_logging_configuration_response, &common_cmds);
+	register_diag_cmd(DIAG_CMD_EXTENDED_MESSAGE_CONFIGURATION_KEY, diag_router_handle_extended_message_configuration_response, &common_cmds);
 	return 0;
 }
 
