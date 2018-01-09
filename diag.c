@@ -200,11 +200,13 @@ int main(int argc, char **argv)
 	list_add(&diag_clients, &config.client->node);
 
 	peripheral_init();
+	diag_router_init();
 
 	diag_dbg(DIAG_DBG_MAIN, "Starting loop\n");
 
 	watch_run();
 
+	diag_router_exit();
 	peripheral_exit();
 
 	list_del(&config.client->node);

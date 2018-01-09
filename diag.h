@@ -99,4 +99,7 @@ int diag_transport_init(struct diag_transport_config *config);
 int diag_transport_exit();
 
 int diag_cmd_forward_to_peripheral(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len);
+
+int diag_router_init();
+int diag_router_exit();
 #endif // __DIAG_H__

@@ -42,6 +42,8 @@
 #include "peripheral.h"
 #include "util.h"
 
+struct list_head apps_cmds = LIST_INIT(apps_cmds);
+
 static int diag_cmd_dispatch(struct diag_client *client,
 				void *buf, size_t len)
 {
@@ -80,7 +82,17 @@ static int diag_cmd_dispatch(struct diag_client *client,
 		diag_dbg(DIAG_DBG_ROUTER, "Respond via peripheral %s\n", peripheral->name);
 
 		return dc->cb(dc, client, buf, len);
+	}
 
+	list_for_each(item, &apps_cmds) {
+		dc = container_of(item, struct diag_cmd, node);
+		if (key < dc->first || key > dc->last) {
+			continue;
+		}
+
+		diag_dbg(DIAG_DBG_ROUTER, "Respond via apps handler\n");
+
+		return dc->cb(dc, client, buf, len);
 	}
 
 	return -ENOENT;
@@ -147,6 +159,26 @@ int diag_cmd_forward_to_peripheral(struct diag_cmd *dc, struct diag_client *clie
 	queue_push(&peripheral->channels[peripheral_ch_type_cmd].queue, fwd_packet);
 
 	diag_dbg(DIAG_DBG_ROUTER, "forwarded to %s\n", peripheral->name);
+
+	return 0;
+}
+
+int diag_router_init()
+{
+	/* Register the cmd's that need to be handled by the router (in case no other peripheral does) */
+	return 0;
+}
+
+int diag_router_exit()
+{
+	struct list_head *item, *next;
+	struct diag_cmd *dc;
+
+	list_for_each_safe(item, next, &apps_cmds) {
+		dc = container_of(item, struct diag_cmd, node);
+		list_del(&dc->node);
+		free(dc);
+	}
 
 	return 0;
 }
