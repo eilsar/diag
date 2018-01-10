@@ -40,6 +40,9 @@
 #include "peripheral.h"
 
 #define PACKET_ALLOC_ALIGNMENT sizeof(void *)
+#ifndef __packed
+#define __packed __attribute__((__packed__))
+#endif
 
 #define BIT(x) (1 << (x))
 
@@ -58,6 +61,12 @@
 #define DIAG_CMD_RSP_BAD_COMMAND			0x13
 #define DIAG_CMD_RSP_BAD_PARAMS				0x14
 #define DIAG_CMD_RSP_BAD_LENGTH				0x15
+
+struct diagpkt_subsys_header {
+	uint8_t   cmd_code;
+	uint8_t   subsys_id;
+	uint16_t  subsys_cmd_code;
+} __packed;
 
 #define get_diag_cmd_key(cmd_id) \
 	(0xffff0000 | (0xffff & (cmd_id)))

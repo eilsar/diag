@@ -58,14 +58,14 @@ static int diag_cmd_dispatch(struct diag_client *client,
 	struct list_head *item;
 	struct diag_cmd *dc;
 	unsigned int key;
-	uint8_t *ptr = buf;
+	struct diagpkt_subsys_header *pkt = buf;
 
-	if (ptr[0] == DIAG_CMD_SUBSYS_DISPATCH || ptr[0] == DIAG_CMD_SUBSYS_DISPATCH_V2) {
-		key = ptr[0] << 24 | ptr[1] << 16 | ptr[3] << 8 | ptr[2];
-		diag_dbg_dump(DIAG_DBG_ROUTER_DUMP, "subsys cmdid = ", ptr, 4);
+	if (pkt->cmd_code == DIAG_CMD_SUBSYS_DISPATCH || pkt->cmd_code == DIAG_CMD_SUBSYS_DISPATCH_V2) {
+		key = get_diag_cmd_subsys_dispatch_key(pkt->cmd_code, pkt->subsys_id, pkt->subsys_cmd_code);
+		diag_dbg_dump(DIAG_DBG_ROUTER_DUMP, "subsys cmdid = ", buf, 4);
 	} else {
-		key = 0xff << 24 | 0xff << 16 | ptr[0];
-		diag_dbg_dump(DIAG_DBG_ROUTER_DUMP, "cmdid = ", ptr, 1);
+		key = get_diag_cmd_key(pkt->cmd_code);
+		diag_dbg_dump(DIAG_DBG_ROUTER_DUMP, "cmdid = ", buf, 1);
 	}
 
 	if (key == DIAG_CMD_KEEP_ALIVE_KEY) {
