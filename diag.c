@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
  * Copyright (c) 2016, Linaro Ltd.
  * All rights reserved.
  *
@@ -61,35 +61,6 @@ unsigned int diag_dbg_mask = DIAG_DBG_NONE;
 struct list_head diag_cmds = LIST_INIT(diag_cmds);
 struct list_head diag_clients = LIST_INIT(diag_clients);
 
-void queue_push(struct list_head *queue, uint8_t *msg, size_t msglen);
-
-static int hdlc_enqueue(struct list_head *queue, uint8_t *msg, size_t msglen)
-{
-	uint8_t *outbuf;
-	size_t outlen;
-
-	outbuf = hdlc_encode(msg, msglen, &outlen);
-	if (!outbuf)
-		err(1, "failed to allocate hdlc destination buffer");
-
-	queue_push(queue, outbuf, outlen);
-
-	return 0;
-}
-
-void queue_push(struct list_head *queue, uint8_t *msg, size_t msglen)
-{
-	struct mbuf *mbuf;
-	void *ptr;
-
-	mbuf = mbuf_alloc(msglen);
-	ptr = mbuf_put(mbuf, msglen);
-	memcpy(ptr, msg, msglen);
-
-	diag_dbg_dump(DIAG_DBG_MAIN_DUMP, "Buffer to send:\n", msg, msglen);
-	list_add(queue, &mbuf->node);
-}
-
 int diag_cmd_recv(int fd, void *data)
 {
 	struct peripheral *peripheral = data;
@@ -113,11 +84,9 @@ int diag_data_recv(int fd, void *data)
 	struct diag_client *client;
 	struct list_head *item;
 	uint8_t buf[APPS_BUF_SIZE];
-	uint8_t *ptr;
-	uint8_t *msg;
-	size_t msglen;
 	size_t len;
 	ssize_t n;
+	struct mbuf *packet;
 
 	for (;;) {
 		n = read(fd, buf, sizeof(buf));
@@ -129,26 +98,12 @@ int diag_data_recv(int fd, void *data)
 			break;
 		}
 
-		ptr = buf;
 		len = n;
-		for (;;) {
-			if (peripheral->features & DIAG_FEATURE_APPS_HDLC_ENCODE) {
-				msg = ptr;
-				msglen = len;
-			} else {
-				msg = hdlc_decode_one(&ptr, &len, &msglen);
-				if (!msg)
-					break;
-			}
 
-			list_for_each(item, &diag_clients) {
-				client = container_of(item, struct diag_client, node);
-
-				queue_push(&client->outq, msg, msglen);
-			}
-
-			if (peripheral->features & DIAG_FEATURE_APPS_HDLC_ENCODE)
-				break;
+		packet = create_packet(buf, len, (peripheral->features & DIAG_FEATURE_APPS_HDLC_ENCODE) ? ENCODE : KEEP_AS_IS);
+		list_for_each(item, &diag_clients) {
+			client = container_of(item, struct diag_client, node);
+			queue_push(&client->outq, packet);
 		}
 	}
 
@@ -163,6 +118,7 @@ static int diag_cmd_dispatch(struct diag_client *client,
 	struct diag_cmd *dc;
 	unsigned int key;
 	int handled = 0;
+	struct mbuf *fwd_packet;
 
 	if (ptr[0] == DIAG_CMD_SUBSYS_DISPATCH)
 		key = ptr[0] << 24 | ptr[1] << 16 | ptr[3] << 8 | ptr[2];
@@ -170,7 +126,11 @@ static int diag_cmd_dispatch(struct diag_client *client,
 		key = 0xff << 24 | 0xff << 16 | ptr[0];
 
 	if (key == 0x4b320003) {
-		return hdlc_enqueue(&client->outq, ptr, len);
+		fwd_packet = create_packet(ptr, len, ENCODE);
+		if (fwd_packet)
+			queue_push(&client->outq, fwd_packet);
+
+		return 0;
 	}
 
 	list_for_each(item, &diag_cmds) {
@@ -180,15 +140,11 @@ static int diag_cmd_dispatch(struct diag_client *client,
 
 		peripheral = dc->peripheral;
 
-		if (peripheral->channels[peripheral_ch_type_cmd].name) {
-			diag_dbg(DIAG_DBG_MAIN, "Respond via peripheral %s\n", peripheral->name);
-			if (peripheral->features & DIAG_FEATURE_APPS_HDLC_ENCODE)
-				queue_push(&peripheral->channels[peripheral_ch_type_cmd].queue, ptr, len);
-			else if (hdlc_enqueue(&peripheral->channels[peripheral_ch_type_cmd].queue, ptr, len))
-				continue;
-		} else {
-			diag_dbg(DIAG_DBG_MAIN, "Peripheral %s command channel not configured\n", peripheral->name);
-		}
+		diag_dbg(DIAG_DBG_MAIN, "Respond via peripheral %s\n", peripheral->name);
+		fwd_packet = create_packet(ptr, len, peripheral->features & DIAG_FEATURE_APPS_HDLC_ENCODE ? KEEP_AS_IS : ENCODE);
+		if (fwd_packet == NULL)
+			break;
+		queue_push(&peripheral->channels[peripheral_ch_type_cmd].queue, fwd_packet);
 
 		handled++;
 	}
@@ -200,6 +156,7 @@ static void diag_rsp_bad_command(struct diag_client *client,
 				 uint8_t *msg, size_t len)
 {
 	uint8_t *buf;
+	struct mbuf *resp_packet;
 
 	buf = malloc(len + 1);
 	if (!buf)
@@ -208,8 +165,9 @@ static void diag_rsp_bad_command(struct diag_client *client,
 	buf[0] = 0x13;
 	memcpy(buf + 1, msg, len);
 
-	diag_dbg(DIAG_DBG_MAIN, "Respond with bad command\n");
-	hdlc_enqueue(&client->outq, buf, len + 1);
+	resp_packet = create_packet(buf, len + 1, ENCODE);
+	if (resp_packet)
+		queue_push(&client->outq, resp_packet);
 
 	free(buf);
 }

@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
  * Copyright (c) 2016, Linaro Ltd.
  * All rights reserved.
  *
@@ -30,6 +31,17 @@
  */
 #ifndef __UTIL_H__
 #define __UTIL_H__
+
+#include <stdint.h>
+#include "list.h"
+#include "mbuf.h"
+
+#define KEEP_AS_IS	0
+#define ENCODE		1
+#define DECODE		2
+
+struct mbuf *create_packet(void *buf, size_t len, uint8_t codec);
+void queue_push(struct list_head *queue, struct mbuf *packet);
 
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof((x)[0]))
 

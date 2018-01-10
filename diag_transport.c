@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
  * Copyright (c) 2016, Linaro Ltd.
  * All rights reserved.
  *
@@ -52,11 +52,9 @@ static int diag_transport_recv(int fd, void* data)
 {
 	struct diag_client *client = (struct diag_client *)data;
 	uint8_t buf[APPS_BUF_SIZE] = { 0 };
-	uint8_t *ptr;
-	uint8_t *msg;
-	size_t msglen;
 	size_t len;
 	ssize_t n;
+	struct mbuf *packet;
 
 	n = read(client->in_fd, buf, sizeof(buf));
 	if ((n < 0) && (errno != EAGAIN)) {
@@ -64,17 +62,13 @@ static int diag_transport_recv(int fd, void* data)
 		return n;
 	}
 
-	ptr = buf;
 	len = n;
 
-	for ( ;; ) {
-		msg = hdlc_decode_one(&ptr, &len, &msglen);
-		if (!msg)
-			break;
-
-		diag_dbg_dump(DIAG_DBG_TRANSPORT_DUMP, "Packet: ", msg, msglen);
-		diag_client_handle_command(client, msg, msglen);
-	}
+	packet = create_packet(buf, len, DECODE);
+	if (packet == NULL)
+		return -ENOMEM;
+	diag_client_handle_command(client, (uint8_t *)packet->data, packet->offset);
+	free(packet);
 
 	return 0;
 }

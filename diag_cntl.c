@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
  * Copyright (c) 2016, Linaro Ltd.
  * All rights reserved.
  *
@@ -191,6 +191,7 @@ void diag_cntl_send_feature_mask(struct peripheral *peripheral)
 	struct diag_cntl_cmd_feature *pkt;
 	size_t len = sizeof(*pkt) + 2;
 	uint32_t mask = 0;
+	struct mbuf *packet;
 
 	mask = DIAG_FEATURE_FEATURE_MASK_SUPPORT |
 	       DIAG_FEATURE_APPS_HDLC_ENCODE;
@@ -202,12 +203,9 @@ void diag_cntl_send_feature_mask(struct peripheral *peripheral)
 	pkt->mask[0] = mask >> 8;
 	pkt->mask[1] = mask & 0xff;
 
-	if (peripheral->channels[peripheral_ch_type_ctrl].name) {
-		diag_dbg(DIAG_DBG_CNTL, "Respond with feature mask to peripheral %s\n", peripheral->name);
-		queue_push(&peripheral->channels[peripheral_ch_type_ctrl].queue, (uint8_t *)pkt, len);
-	} else {
-		diag_dbg(DIAG_DBG_CNTL, "Peripheral %s control channel not configured\n", peripheral->name);
-	}
+	packet = create_packet((uint8_t *)pkt, len, KEEP_AS_IS);
+	if (packet)
+		queue_push(&peripheral->channels[peripheral_ch_type_ctrl].queue, packet);
 }
 
 int diag_cntl_recv(int fd, void *data)

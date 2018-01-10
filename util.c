@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
  * Copyright (c) 2016, Bjorn Andersson <bjorn@kryo.se>
  * All rights reserved.
  *
@@ -29,9 +30,63 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <ctype.h>
+#include <err.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "hdlc.h"
+#include "list.h"
+#include "mbuf.h"
 #include "util.h"
+
+struct mbuf *create_packet(void *buf, size_t len, uint8_t codec)
+{
+	uint8_t *outbuf = buf;
+	size_t outlen = len;
+	struct mbuf *packet;
+	void *ptr;
+
+	switch (codec) {
+	case ENCODE:
+		outbuf = hdlc_encode(buf, len, &outlen);
+		if (!outbuf) {
+			warn( "failed to encode buffer");
+			return NULL;
+		}
+		break;
+	case DECODE:
+		outbuf = hdlc_decode_one((uint8_t **)&buf, &len, &outlen);
+		if (!outbuf) {
+			warn( "failed to decode buffer");
+			return NULL;
+		}
+		break;
+	case KEEP_AS_IS:
+	default:
+		break;
+	}
+
+	packet = mbuf_alloc(outlen);
+	if (packet == NULL)
+		goto end;
+	ptr = mbuf_put(packet, outlen);
+	memcpy(ptr, outbuf, outlen);
+
+end:
+	if (codec == ENCODE) {
+		free(outbuf);
+	}
+
+	return packet;
+}
+
+void queue_push(struct list_head *queue, struct mbuf *packet)
+{
+	list_add(queue, &packet->node);
+}
 
 static uint8_t to_hex(uint8_t ch)
 {

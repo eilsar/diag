@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2018, The Linux Foundation. All rights reserved.
  * Copyright (c) 2016, Linaro Ltd.
  * All rights reserved.
  *
@@ -35,6 +35,8 @@
 #include <stdint.h>
 
 #include "list.h"
+#include "mbuf.h"
+#include "peripheral.h"
 
 #define BIT(x) (1 << (x))
 
@@ -66,8 +68,6 @@ struct diag_cmd {
 
 	struct peripheral *peripheral;
 };
-
-void queue_push(struct list_head *queue, uint8_t *msg, size_t msglen);
 
 extern struct list_head diag_cmds;
 
