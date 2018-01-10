@@ -41,10 +41,13 @@
 #include "diag.h"
 #include "diag_dbg.h"
 #include "diag_cntl.h"
+#include "masks.h"
 #include "peripheral.h"
 #include "util.h"
 
-#define __packed __attribute__((packed))
+#ifndef __packed
+#define __packed __attribute__((__packed__))
+#endif
 
 #define DIAG_CTRL_MSG_DTR               2
 #define DIAG_CTRL_MSG_DIAGMODE          3
@@ -101,6 +104,38 @@ struct diag_cntl_cmd_feature {
 	uint8_t mask[];
 } __packed;
 #define to_cmd_feature(h) container_of(h, struct diag_cntl_cmd_feature, hdr)
+
+#define DIAG_CNTL_CMD_LOG_MASK 9
+struct diag_cntl_cmd_log_mask {
+	struct diag_cntl_hdr hdr;
+	uint8_t stream_id;
+	uint8_t status;
+	uint8_t equip_id;
+	uint32_t last_item;
+	uint32_t log_mask_size;
+	uint8_t equip_log_mask[];
+} __packed;
+
+#define DIAG_CNTL_CMD_MSG_MASK 11
+struct diag_cntl_cmd_msg_mask {
+	struct diag_cntl_hdr hdr;
+	uint8_t stream_id;
+	uint8_t status;
+	uint8_t msg_mode;
+	struct diag_ssid_range_t range;
+	uint32_t msg_mask_len;
+	uint8_t range_msg_mask[];
+} __packed;
+
+#define DIAG_CNTL_CMD_EVENT_MASK 10
+struct diag_cntl_cmd_event_mask {
+	struct diag_cntl_hdr hdr;
+	uint8_t stream_id;
+	uint8_t status;
+	uint8_t event_config;
+	uint32_t event_mask_len;
+	uint8_t event_mask[];
+} __packed;
 
 #define DIAG_CNTL_CMD_NUM_PRESETS 12
 struct diag_cntl_num_presets {
@@ -163,8 +198,12 @@ static int diag_cntl_feature_mask(struct peripheral *peripheral,
 
 	if (mask & DIAG_FEATURE_FEATURE_MASK_SUPPORT)
 		strcat(features, " FEATURE_MASK_SUPPORT");
+	if (mask & DIAG_FEATURE_DIAG_MASTER_SETS_COMMON_MASK)
+		strcat(features, " DIAG_MASTER_SETS_COMMON_MASK");
 	if (mask & DIAG_FEATURE_LOG_ON_DEMAND_APPS)
 		strcat(features, " LOG_ON_DEMAND");
+	if (mask & DIAG_FEATURE_DIAG_VERSION_RSP_ON_MASTER)
+		strcat(features, " DIAG_VERSION_RSP_ON_MASTER");
 	if (mask & DIAG_FEATURE_REQ_RSP_SUPPORT)
 		strcat(features, " REQ_RSP");
 	if (mask & DIAG_FEATURE_APPS_HDLC_ENCODE)
@@ -187,6 +226,138 @@ static int diag_cntl_feature_mask(struct peripheral *peripheral,
 	return 0;
 }
 
+void diag_cntl_send_log_mask(struct peripheral *peripheral, uint32_t equip_id)
+{
+	struct diag_cntl_cmd_log_mask *pkt;
+	size_t len = sizeof(*pkt);
+	uint32_t num_items = 0;
+	uint8_t *mask = NULL;
+	uint32_t mask_size = 0;
+	uint8_t status = diag_get_log_mask_status();
+
+	if (peripheral == NULL)
+		return;
+	if (peripheral->channels[peripheral_ch_type_ctrl].fd == -1) {
+		warn("Peripheral %s has no control channel. Skipping!\n", peripheral->name);
+		return;
+	}
+
+	if (status == DIAG_CTRL_MASK_VALID) {
+		diag_cmd_get_log_mask(equip_id, &num_items, &mask, &mask_size);
+	} else {
+		equip_id = 0;
+	}
+	len += mask_size;
+	if (posix_memalign((void **)&pkt, PACKET_ALLOC_ALIGNMENT, len)) {
+		warn("Failed to allocate response packet\n");
+		return;
+	}
+	pkt->hdr.cmd = DIAG_CNTL_CMD_LOG_MASK;
+	pkt->hdr.len = len - sizeof(struct diag_cntl_hdr);
+	pkt->stream_id = 1;
+	pkt->status = status;
+	pkt->equip_id = equip_id;
+	pkt->last_item = num_items;
+	pkt->log_mask_size = mask_size;
+	if (mask != NULL) {
+		memcpy(pkt->equip_log_mask, mask, mask_size);
+		free(mask);
+	}
+
+	queue_push(&peripheral->channels[peripheral_ch_type_ctrl].queue, create_packet((uint8_t *)pkt, len, false));
+	free(pkt);
+}
+
+void diag_cntl_send_msg_mask(struct peripheral *peripheral, struct diag_ssid_range_t *range)
+{
+	struct diag_cntl_cmd_msg_mask *pkt;
+	size_t len = sizeof(*pkt);
+	uint32_t num_items = 0;
+	uint32_t *mask = NULL;
+	uint32_t mask_size = 0;
+	struct diag_ssid_range_t DUMMY_RANGE = { 0, 0 };
+	uint8_t status = diag_get_msg_mask_status();
+
+	if (peripheral == NULL)
+		return;
+	if (peripheral->channels[peripheral_ch_type_ctrl].fd == -1) {
+		warn("Peripheral %s has no control channel. Skipping!\n", peripheral->name);
+		return;
+	}
+
+	if (status == DIAG_CTRL_MASK_VALID) {
+		diag_cmd_get_msg_mask(range, &mask);
+		num_items = range->ssid_last - range->ssid_first + 1;
+	} else if (status == DIAG_CTRL_MASK_ALL_DISABLED) {
+		range = &DUMMY_RANGE;
+		num_items = 0;
+	} else if (status == DIAG_CTRL_MASK_ALL_ENABLED) {
+		diag_cmd_get_msg_mask(range, &mask);
+		num_items = 1;
+	}
+	mask_size = num_items * sizeof(*mask);
+	len += mask_size;
+	if (posix_memalign((void **)&pkt, PACKET_ALLOC_ALIGNMENT, len)) {
+		warn("Failed to allocate response packet\n");
+		return;
+	}
+	pkt->hdr.cmd = DIAG_CNTL_CMD_MSG_MASK;
+	pkt->hdr.len = len - sizeof(struct diag_cntl_hdr);
+	pkt->stream_id = 1;
+	pkt->status = status;
+	pkt->msg_mode = 0;
+	pkt->range = *range;
+	pkt->msg_mask_len = num_items;
+	if (mask != NULL) {
+		memcpy(pkt->range_msg_mask, mask, mask_size);
+		free(mask);
+	}
+
+	queue_push(&peripheral->channels[peripheral_ch_type_ctrl].queue, create_packet((uint8_t *)pkt, len, false));
+	free(pkt);
+}
+
+void diag_cntl_send_event_mask(struct peripheral *peripheral)
+{
+	struct diag_cntl_cmd_event_mask *pkt;
+	size_t len = sizeof(*pkt);
+	uint8_t *mask = NULL;
+	uint16_t mask_size = 0;
+	uint8_t status = diag_get_event_mask_status();
+	uint8_t event_config = (status == DIAG_CTRL_MASK_ALL_ENABLED || status == DIAG_CTRL_MASK_VALID) ? 0x1 : 0x0;
+
+	if (peripheral == NULL)
+		return;
+	if (peripheral->channels[peripheral_ch_type_ctrl].fd == -1) {
+		warn("Peripheral %s has no control channel. Skipping!\n", peripheral->name);
+		return;
+	}
+
+	if (status == DIAG_CTRL_MASK_VALID) {
+		if (diag_cmd_get_event_mask(event_max_num_bits , &mask) == 0) {
+			mask_size = EVENT_COUNT_TO_BYTES(event_max_num_bits );
+		}
+	}
+	len += mask_size;
+	if (posix_memalign((void **)&pkt, PACKET_ALLOC_ALIGNMENT, len)) {
+		warn("Failed to allocate response packet\n");
+		return;
+	}
+	pkt->hdr.cmd = DIAG_CNTL_CMD_EVENT_MASK;
+	pkt->hdr.len = len - sizeof(struct diag_cntl_hdr);
+	pkt->stream_id = 1;
+	pkt->status = status;
+	pkt->event_config = event_config;
+	pkt->event_mask_len = mask_size;
+	if (mask != NULL) {
+		memcpy(pkt->event_mask, mask, mask_size);
+		free(mask);
+	}
+
+	queue_push(&peripheral->channels[peripheral_ch_type_ctrl].queue, create_packet((uint8_t *)pkt, len, false));
+	free(pkt);
+}
+
 void diag_cntl_send_feature_mask(struct peripheral *peripheral)
 {
 	struct diag_cntl_cmd_feature *pkt;
@@ -194,16 +365,26 @@ void diag_cntl_send_feature_mask(struct peripheral *peripheral)
 	uint32_t mask = 0;
 	struct mbuf *packet;
 
-	mask = DIAG_FEATURE_FEATURE_MASK_SUPPORT |
-	       DIAG_FEATURE_APPS_HDLC_ENCODE;
+	if (peripheral->channels[peripheral_ch_type_ctrl].fd == -1) {
+		warn("Peripheral %s has no control channel. Skipping!\n", peripheral->name);
+		return;
+	}
 
-	pkt = malloc(len);
+	mask = DIAG_FEATURE_FEATURE_MASK_SUPPORT | 
+	       DIAG_FEATURE_DIAG_MASTER_SETS_COMMON_MASK | 
+	       DIAG_FEATURE_APPS_HDLC_ENCODE ;
+
+	if (posix_memalign((void **)&pkt, PACKET_ALLOC_ALIGNMENT, len)) {
+		warn("Failed to allocate response packet\n");
+		return;
+	}
 	pkt->hdr.cmd = DIAG_CNTL_CMD_FEATURE_MASK;
 	pkt->hdr.len = len - sizeof(struct diag_cntl_hdr);
 	pkt->mask_len = 2;
-	pkt->mask[0] = mask >> 8;
-	pkt->mask[1] = mask & 0xff;
+	pkt->mask[0] = (mask >> 8) & 0xff;
+	pkt->mask[1] = (mask >> 0) & 0xff;
 
+	diag_dbg(DIAG_DBG_CNTL, "Respond with feature mask to peripheral %s\n", peripheral->name);
 	packet = create_packet((uint8_t *)pkt, len, KEEP_AS_IS);
 	if (packet)
 		queue_push(&peripheral->channels[peripheral_ch_type_ctrl].queue, packet);
