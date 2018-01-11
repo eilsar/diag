@@ -129,8 +129,10 @@ static int diag_cntl_register(struct peripheral *peripheral,
 		//	  peripheral->name, first, last);
 
 		dc = malloc(sizeof(*dc));
-		if (!dc)
-			err(1, "malloc failed");
+		if (!dc) {
+			warn("malloc failed");
+			return -ENOMEM;
+		}
 		memset(dc, 0, sizeof(*dc));
 
 		dc->first = first;
