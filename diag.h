@@ -32,6 +32,7 @@
 #ifndef __DIAG_H__
 #define __DIAG_H__
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "list.h"
@@ -95,11 +96,14 @@ struct diag_client {
 	int in_fd;
 	int out_fd;
 	struct list_head outq;
+	bool encoded;
 
 	struct list_head node;
 };
 
 extern struct list_head diag_clients;
+
+#define DIAG_CLIENT_ENCODED	true
 
 struct diag_cmd {
 	unsigned int first;
@@ -132,7 +136,7 @@ struct diag_transport_config {
 #define DEFAULT_SOCKET_PORT 2500
 #define DEFAULT_BAUD_RATE 115200
 
-int diag_transport_send(struct diag_client *client, void *buf, size_t len);
+int diag_transport_send(struct diag_client *client, void *buf, size_t len, bool encoded);
 
 int diag_transport_init(struct diag_transport_config *config);
 int diag_transport_exit();

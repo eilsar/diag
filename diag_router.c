@@ -69,7 +69,7 @@ static int diag_cmd_dispatch(struct diag_client *client,
 	}
 
 	if (key == DIAG_CMD_KEEP_ALIVE_KEY) {
-		return diag_transport_send(client, buf, len);
+		return diag_transport_send(client, buf, len, false);
 	}
 
 	list_for_each(item, &common_cmds) {
@@ -125,7 +125,7 @@ static int diag_rsp_bad_command(struct diag_client *client,
 	resp_buf[0] = bad_code;
 	memcpy(resp_buf + 1, buf, len);
 
-	ret = diag_transport_send(client, resp_buf, resp_buf_len);
+	ret = diag_transport_send(client, resp_buf, resp_buf_len, false);
 	free(resp_buf);
 
 	return ret;
@@ -224,7 +224,7 @@ static int diag_router_handle_logging_configuration_response(struct diag_cmd *dc
 			diag_cntl_send_log_mask(peripheral, 0); // equip_id is ignored
 		}
 
-		ret = diag_transport_send(client, &resp, sizeof(resp));
+		ret = diag_transport_send(client, &resp, sizeof(resp), false);
 		break;
 	}
 	case DIAG_CMD_OP_GET_LOG_RANGE: {
@@ -242,7 +242,7 @@ static int diag_router_handle_logging_configuration_response(struct diag_cmd *dc
 		diag_cmd_get_log_range(resp.ranges, MAX_EQUIP_ID);
 		resp.status = DIAG_CMD_STATUS_SUCCESS;
 
-		ret = diag_transport_send(client, &resp, sizeof(resp));
+		ret = diag_transport_send(client, &resp, sizeof(resp), false);
 
 		break;
 	}
@@ -276,7 +276,7 @@ static int diag_router_handle_logging_configuration_response(struct diag_cmd *dc
 			diag_cntl_send_log_mask(peripheral, resp->mask_structure.equip_id);
 		}
 
-		ret = diag_transport_send(client, resp, resp_size);
+		ret = diag_transport_send(client, resp, resp_size, false);
 		free(resp);
 
 		break;
@@ -327,7 +327,7 @@ static int diag_router_handle_logging_configuration_response(struct diag_cmd *dc
 			diag_cntl_send_log_mask(peripheral, resp->mask_structure.equip_id);
 		}
 
-		ret = diag_transport_send(client, resp, resp_size);
+		ret = diag_transport_send(client, resp, resp_size, false);
 		free(resp);
 
 		break;
@@ -384,7 +384,7 @@ static int diag_router_handle_extended_message_configuration_response(struct dia
 		}
 		resp->status = DIAG_CMD_MSG_STATUS_SUCCESSFUL;
 
-		ret = diag_transport_send(client, resp, resp_size);
+		ret = diag_transport_send(client, resp, resp_size, false);
 		free(resp);
 
 		break;
@@ -427,7 +427,7 @@ static int diag_router_handle_extended_message_configuration_response(struct dia
 			resp->status = DIAG_CMD_MSG_STATUS_UNSUCCESSFUL;
 		}
 
-		ret = diag_transport_send(client, resp, resp_size);
+		ret = diag_transport_send(client, resp, resp_size, false);
 		free(resp);
 
 		break;
@@ -470,7 +470,7 @@ static int diag_router_handle_extended_message_configuration_response(struct dia
 			resp->status = DIAG_CMD_MSG_STATUS_UNSUCCESSFUL;
 		}
 
-		ret = diag_transport_send(client, resp, resp_size);
+		ret = diag_transport_send(client, resp, resp_size, false);
 		free(resp);
 
 		break;
@@ -525,7 +525,7 @@ static int diag_router_handle_extended_message_configuration_response(struct dia
 			resp->status = DIAG_CMD_MSG_STATUS_UNSUCCESSFUL;
 		}
 
-		ret = diag_transport_send(client, resp, resp_size);
+		ret = diag_transport_send(client, resp, resp_size, false);
 		free(resp);
 
 		break;
@@ -558,7 +558,7 @@ static int diag_router_handle_extended_message_configuration_response(struct dia
 			diag_cntl_send_msg_mask(peripheral, NULL); // range is ignored
 		}
 
-		ret = diag_transport_send(client, &resp, sizeof(resp));
+		ret = diag_transport_send(client, &resp, sizeof(resp), false);
 		break;
 	}
 	default:
@@ -620,7 +620,7 @@ static int diag_router_handle_event_get_mask_response(struct diag_cmd *dc, struc
 		resp->error_code = DIAG_CMD_EVENT_ERROR_CODE_FAIL;
 	}
 
-	ret = diag_transport_send(client, resp, resp_size);
+	ret = diag_transport_send(client, resp, resp_size, false);
 	free(resp);
 
 	return ret;
@@ -679,7 +679,7 @@ static int diag_router_handle_event_set_mask_response(struct diag_cmd *dc, struc
 		resp->error_code = DIAG_CMD_EVENT_ERROR_CODE_FAIL;
 	}
 
-	ret = diag_transport_send(client, resp, resp_size);
+	ret = diag_transport_send(client, resp, resp_size, false);
 	free(resp);
 
 	return ret;
@@ -716,7 +716,7 @@ static int diag_router_handle_event_report_control_response(struct diag_cmd *dc,
 			diag_cntl_send_event_mask(peripheral);
 		}
 
-		ret = diag_transport_send(client, &resp, sizeof(resp));
+		ret = diag_transport_send(client, &resp, sizeof(resp), false);
 		break;
 	default:
 		warn("Unrecognized operation %d!!!", req->operation_switch);
@@ -780,7 +780,7 @@ static int diag_router_handle_extended_build_id(struct diag_cmd *dc, struct diag
 	strncpy(resp->strings, MOBILE_SOFTWARE_REVISION, string1_size);
 	strncpy(resp->strings + string1_size, MOBILE_MODEL_STRING, string2_size);
 
-	ret = diag_transport_send(client, resp, resp_size);
+	ret = diag_transport_send(client, resp, resp_size, false);
 	free(resp);
 
 	return ret;
@@ -805,7 +805,7 @@ static int diag_router_handle_diag_version(struct diag_cmd *dc, struct diag_clie
 	resp.cmd_code = req->cmd_code;
 	resp.ver = DIAG_PROTOCOL_VERSION_NUMBER;
 
-	return diag_transport_send(client, &resp, sizeof(resp));
+	return diag_transport_send(client, &resp, sizeof(resp), false);
 }
 
 static struct diag_cmd *register_diag_cmd(unsigned int key,

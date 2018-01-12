@@ -103,18 +103,26 @@ static int diag_transport_recv(int fd, void* data)
 	return 0;
 }
 
-int diag_transport_send(struct diag_client *client, void *buf, size_t len)
+int diag_transport_send(struct diag_client *client, void *buf, size_t len, bool encoded)
 {
-	struct mbuf *resp_packet = create_packet(buf, len, ENCODE);
+	uint8_t transform = KEEP_AS_IS;
+	struct mbuf *resp_packet;
+
+	if (client == NULL) {
+		client = config->client;
+	}
+
+	if (client->encoded && !encoded)
+		transform = ENCODE;
+	else if (!client->encoded && encoded)
+		transform = DECODE;
+
+	resp_packet = create_packet(buf, len, transform);
 
 	if (resp_packet == NULL) {
 		warn("failed to create packet");
 
 		return -1;
-	}
-
-	if (client == NULL) {
-		client = config->client;
 	}
 
 	diag_dbg_dump(DIAG_DBG_TRANSPORT_DUMP, "Sending:\n", resp_packet->data, resp_packet->offset);
@@ -130,6 +138,8 @@ int diag_transport_init(struct diag_transport_config *dtc)
 	config = dtc;
 	config->client = malloc(sizeof(struct diag_client));
 	memset(config->client, 0, sizeof(struct diag_client));
+
+	config->client->encoded = DIAG_CLIENT_ENCODED;
 
 	if (config->hostname)
 		ret = diag_sock_connect(config->hostname, config->port);
