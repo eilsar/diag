@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
  * Copyright (c) 2016, Linaro Ltd.
  * All rights reserved.
  *
@@ -29,6 +30,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 #include <err.h>
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -206,14 +208,16 @@ int diag_cntl_recv(int fd, void *data)
 {
 	struct peripheral *peripheral = data;
 	struct diag_cntl_hdr *hdr;
-	uint8_t buf[4096];
+	uint8_t buf[APPS_BUF_SIZE];
 	size_t offset = 0;
 	ssize_t n;
 
 	n = read(fd, buf, sizeof(buf));
 	if (n < 0) {
-		warn("failed to read from cntl channel");
-		peripheral_close(peripheral);
+		if (errno != EAGAIN) {
+			warn("failed to read from cntl channel");
+			peripheral_close(peripheral);
+		}
 		return 0;
 	}
 
@@ -260,5 +264,4 @@ void diag_cntl_close(struct peripheral *peripheral)
 		if (dc->peripheral == peripheral)
 			list_del(&dc->node);
 	}
-
 }
