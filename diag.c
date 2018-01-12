@@ -112,7 +112,7 @@ int diag_data_recv(int fd, void *data)
 	struct peripheral *peripheral = data;
 	struct diag_client *client;
 	struct list_head *item;
-	uint8_t buf[4096];
+	uint8_t buf[APPS_BUF_SIZE];
 	uint8_t *ptr;
 	uint8_t *msg;
 	size_t msglen;
@@ -188,19 +188,14 @@ static int diag_sock_connect(const char *hostname, unsigned short port)
 	return fd;
 }
 
-static int diag_cmd_dispatch(uint8_t *ptr, size_t len)
+static int diag_cmd_dispatch(struct diag_client *client,
+				uint8_t *ptr, size_t len)
 {
 	struct peripheral *peripheral;
 	struct list_head *item;
 	struct diag_cmd *dc;
-	uint8_t *outbuf;
-	size_t outlen;
 	unsigned int key;
 	int handled = 0;
-
-	outbuf = hdlc_encode(ptr, len, &outlen);
-	if (!outbuf)
-		err(1, "failed to allocate hdlc destination buffer");
 
 	if (ptr[0] == DIAG_CMD_SUBSYS_DISPATCH)
 		key = ptr[0] << 24 | ptr[1] << 16 | ptr[3] << 8 | ptr[2];
@@ -214,15 +209,19 @@ static int diag_cmd_dispatch(uint8_t *ptr, size_t len)
 
 		peripheral = dc->peripheral;
 
-		if (peripheral->features & DIAG_FEATURE_APPS_HDLC_ENCODE)
-			queue_push(&peripheral->dataq, ptr, len);
-		else
-			hdlc_enqueue(&dc->peripheral->dataq, ptr, len);
+		if (peripheral->channels[peripheral_ch_type_cmd].name) {
+			diag_dbg(DIAG_DBG_MAIN, "Respond via peripheral %s\n", peripheral->name);
+			if (peripheral->features & DIAG_FEATURE_APPS_HDLC_ENCODE)
+				queue_push(&peripheral->channels[peripheral_ch_type_cmd].queue, ptr, len);
+			else if (hdlc_enqueue(&peripheral->channels[peripheral_ch_type_cmd].queue, ptr, len))
+				continue;
+		} else {
+			diag_dbg(DIAG_DBG_MAIN, "Peripheral %s command channel not configured\n", peripheral->name);
+		}
 
 		handled++;
 	}
 
-	free(outbuf);
 
 	return handled ? 0 : -ENOENT;
 }
@@ -268,8 +267,8 @@ static int diag_sock_recv(int fd, void *data)
 		if (!msg)
 			break;
 
-		ret = diag_cmd_dispatch(msg, msglen);
 		diag_dbg_dump(DIAG_DBG_MAIN, "Decoded buffer:\n", msg, msglen);
+		ret = diag_cmd_dispatch(client, msg, msglen);
 		if (ret < 0)
 			diag_rsp_bad_command(client, msg, msglen);
 	}
@@ -352,6 +351,8 @@ int main(int argc, char **argv)
 	diag_dbg(DIAG_DBG_MAIN, "Starting loop\n");
 
 	watch_run();
+
+	peripheral_exit();
 
 	return 0;
 }

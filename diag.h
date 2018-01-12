@@ -57,21 +57,6 @@ struct diag_client {
 	struct list_head node;
 };
 
-struct peripheral {
-	struct list_head  node;
-
-	char *name;
-
-	unsigned long features;
-
-	struct list_head cntlq;
-	struct list_head dataq;
-
-	int cntl_fd;
-	int data_fd;
-	int cmd_fd;
-};
-
 struct diag_cmd {
 	struct list_head node;
 

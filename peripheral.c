@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
  * Copyright (c) 2016, Linaro Ltd.
  * All rights reserved.
  *
@@ -44,12 +45,15 @@
 #include <unistd.h>
 #include <string.h>
 
-#include "diag.h"
+#include "diag_dbg.h"
 #include "diag_cntl.h"
 #include "list.h"
 #include "peripheral.h"
 #include "util.h"
 #include "watch.h"
+
+struct list_head devnodes = LIST_INIT(devnodes);
+struct list_head peripherals = LIST_INIT(peripherals);
 
 struct devnode {
 	char *devnode;
@@ -58,9 +62,6 @@ struct devnode {
 
 	struct list_head node;
 };
-
-struct list_head peripherals = LIST_INIT(peripherals);
-struct list_head devnodes = LIST_INIT(devnodes);
 
 static struct devnode *devnode_get(const char *devnode)
 {
@@ -109,6 +110,8 @@ static void devnode_add(const char *devnode, const char *name, const char *rproc
 	node->rproc = strdup(rproc);
 
 	list_add(&devnodes, &node->node);
+
+	diag_dbg(DIAG_DBG_PERIPHERAL, "Added device node (%s %s %s)\n", node->devnode, node->rproc, node->name);
 }
 
 static void devnode_remove(const char *devnode)
@@ -120,6 +123,8 @@ static void devnode_remove(const char *devnode)
 		return;
 
 	list_del(&node->node);
+
+	diag_dbg(DIAG_DBG_PERIPHERAL, "Removed device node (%s %s %s)\n", node->devnode, node->rproc, node->name);
 
 	free(node->name);
 	free(node->devnode);
@@ -147,131 +152,9 @@ static const char *peripheral_udev_get_remoteproc(struct udev_device *dev)
 	return peripheral_udev_get_remoteproc(parent);
 }
 
-static void peripheral_open(void *data)
-{
-	struct peripheral *peripheral = data;
-	char *rproc = peripheral->name;
-	int ret;
-	int fd;
+static int peripheral_udev_update(int fd, void *data);
 
-	fd = devnode_open(rproc, "DIAG");
-	if (fd < 0)
-		fd = devnode_open(rproc, "APPS_RIVA_DATA");
-	if (fd < 0) {
-		warn("unable to open DIAG channel\n");
-		return;
-	}
-	peripheral->data_fd = fd;
-
-	fd = devnode_open(rproc, "DIAG_CNTL");
-	if (fd < 0)
-		fd = devnode_open(rproc, "APPS_RIVA_CTRL");
-	if (fd < 0) {
-		warn("unable to find DIAG_CNTL channel\n");
-		close(peripheral->data_fd);
-		peripheral->data_fd = -1;
-		return;
-	}
-	peripheral->cntl_fd = fd;
-
-	fd = devnode_open(rproc, "DIAG_CMD");
-	if (fd >= 0)
-		peripheral->cmd_fd = fd;
-
-	ret = fcntl(peripheral->data_fd, F_SETFL, O_NONBLOCK);
-	if (ret < 0)
-		warn("failed to turn DIAG non blocking");
-
-	watch_add_writeq(peripheral->cntl_fd, &peripheral->cntlq);
-	watch_add_writeq(peripheral->data_fd, &peripheral->dataq);
-	watch_add_readfd(peripheral->cntl_fd, diag_cntl_recv, peripheral);
-	watch_add_readfd(peripheral->data_fd, diag_data_recv, peripheral);
-}
-
-static int peripheral_create(const char *name)
-{
-	struct peripheral *peripheral;
-	struct list_head *item;
-
-	list_for_each(item, &peripherals) {
-		peripheral = container_of(item, struct peripheral, node);
-		if (strcmp(peripheral->name, name) == 0)
-			return 0;
-	}
-
-	peripheral = malloc(sizeof(*peripheral));
-	memset(peripheral, 0, sizeof(*peripheral));
-
-	peripheral->name = strdup(name);
-	peripheral->data_fd = -1;
-	peripheral->cntl_fd = -1;
-	peripheral->cmd_fd = -1;
-	list_add(&peripherals, &peripheral->node);
-
-	watch_add_timer(peripheral_open, peripheral, 1000, false);
-
-	return 0;
-}
-
-void peripheral_close(struct peripheral *peripheral)
-{
-	diag_cntl_close(peripheral);
-
-	watch_remove_fd(peripheral->data_fd);
-	watch_remove_fd(peripheral->cntl_fd);
-	watch_remove_fd(peripheral->cmd_fd);
-
-	close(peripheral->data_fd);
-	close(peripheral->cntl_fd);
-	close(peripheral->cmd_fd);
-
-	list_del(&peripheral->node);
-	free(peripheral->name);
-	free(peripheral);
-}
-
-static int peripheral_udev_update(int fd, void *data)
-{
-	struct udev_monitor *mon = data;
-	struct udev_device *dev;
-	const char *devnode;
-	const char *action;
-	const char *rproc;
-	const char *name;
-
-	dev = udev_monitor_receive_device(mon);
-	if (!dev)
-		return 0;
-
-	action = udev_device_get_action(dev);
-	devnode = udev_device_get_devnode(dev);
-
-	if (!devnode)
-		goto unref_dev;
-
-	if (strcmp(action, "add") == 0) {
-		name = peripheral_udev_get_name(dev);
-		rproc = peripheral_udev_get_remoteproc(dev);
-
-		if (!name || !rproc)
-			goto unref_dev;
-
-		devnode_add(devnode, name, rproc);
-
-		peripheral_create(rproc);
-	} else if (strcmp(action, "remove") == 0) {
-		devnode_remove(devnode);
-	} else {
-		warn("unknown udev action");
-	}
-
-unref_dev:
-	udev_device_unref(dev);
-
-	return 0;
-}
-
-int peripheral_init(void)
+static int peripheral_udev_init(void)
 {
 	struct udev_list_entry *devices;
 	struct udev_list_entry *entry;
@@ -310,13 +193,233 @@ int peripheral_init(void)
 
 		if (devnode && name && rproc) {
 			devnode_add(devnode, name, rproc);
-			peripheral_create(rproc);
 		}
 
 		udev_device_unref(dev);
 	}
 
 	watch_add_readfd(fd, peripheral_udev_update, mon);
+
+	return 0;
+}
+
+void peripheral_close(struct peripheral *peripheral)
+{
+	int i;
+	struct channel *ch;
+
+	if (peripheral == NULL)
+		return;
+
+	diag_cntl_close(peripheral);
+	diag_dbg(DIAG_DBG_PERIPHERAL, "Closing each channel\n");
+	for (i = peripheral_ch_type_data; i < MAX_NUM_OF_CH; i++) {
+		ch = &peripheral->channels[i];
+		if (ch->name && ch->fd >= 0) {
+			watch_remove_fd(ch->fd);
+			diag_dbg(DIAG_DBG_PERIPHERAL, "Closing channel %s fd = %d\n", ch->name, ch->fd);
+			close(ch->fd);
+			ch->fd = -1;
+		}
+	}
+}
+
+static void peripheral_open(struct peripheral *peripheral)
+{
+	int i;
+	int fd = -1;
+	struct channel *ch;
+	int ret;
+
+	if (peripheral == NULL)
+		return;
+
+	for (i = peripheral_ch_type_data; i < MAX_NUM_OF_CH; i++) {
+		ch = &peripheral->channels[i];
+		if (ch->name && ch->fd < 0) {
+			fd = devnode_open(peripheral->name, ch->name);
+			if (fd >= 0) {
+				ch->fd = fd;
+				diag_dbg(DIAG_DBG_PERIPHERAL, "Opened on device %s channel %s with fd = %d\n", peripheral->name, ch->name, ch->fd);
+				switch (i) {
+				case peripheral_ch_type_data:
+					ret = fcntl(ch->fd, F_SETFL, O_NONBLOCK);
+					if (ret < 0)
+						warn("failed to turn %s non blocking", ch->name);
+					watch_add_writeq(ch->fd, &ch->queue);
+					watch_add_readfd(ch->fd, diag_data_recv, peripheral);
+					break;
+				case peripheral_ch_type_ctrl:
+					watch_add_writeq(ch->fd, &ch->queue);
+					watch_add_readfd(ch->fd, diag_cntl_recv, peripheral);
+					break;
+				case peripheral_ch_type_cmd:
+					watch_add_writeq(ch->fd, &ch->queue);
+					watch_add_readfd(ch->fd, diag_cmd_recv, peripheral);
+					break;
+				default:
+					break;
+				}
+			} else {
+				warn("failed to open %s channel closing peripheral %s", ch->name, peripheral->name);
+				peripheral_close(peripheral);
+				break;
+			}
+		}
+	}
+
+	return;
+}
+
+static struct peripheral *peripheral_get_by_name(const char* name)
+{
+	struct list_head *item;
+	struct peripheral *peripheral;
+
+	list_for_each(item, &peripherals) {
+		peripheral = container_of(item, struct peripheral, node);
+		if (strcmp(peripheral->name, name) == 0) {
+			return peripheral;
+		}
+	}
+
+	return NULL;
+}
+
+static struct peripheral* peripheral_create(const char *name)
+{
+	struct peripheral *peripheral;
+	int i;
+	struct channel *ch;
+
+	peripheral = peripheral_get_by_name(name);
+	if (peripheral != NULL) {
+		warn("%s device created already!\n", name);
+		return peripheral;
+	}
+
+	peripheral = malloc(sizeof(*peripheral));
+	memset(peripheral, 0, sizeof(*peripheral));
+
+	for (i = peripheral_ch_type_data; i < MAX_NUM_OF_CH; i++) {
+		ch = &peripheral->channels[i];
+		ch->fd = -1;
+	}
+
+	peripheral->name = strdup(name);
+	list_add(&peripherals, &peripheral->node);
+
+	return peripheral;
+}
+
+static void peripheral_destroy(struct peripheral* peripheral)
+{
+	int i;
+	struct channel *ch;
+
+	if (peripheral != NULL) {
+		for (i = peripheral_ch_type_data; i < MAX_NUM_OF_CH; i++) {
+			ch = &peripheral->channels[i];
+			free(ch->name);
+		}
+		list_del(&peripheral->node);
+		free(peripheral->name);
+		free(peripheral);
+	}
+}
+
+static int peripheral_set_channel(struct peripheral *peripheral,
+								  const char *ch_name, enum peripheral_ch_type ch_type)
+{
+	if (peripheral != NULL) {
+		diag_dbg(DIAG_DBG_PERIPHERAL, "Added to %s device channel %s\n", peripheral->name, ch_name);
+		peripheral->channels[ch_type].name = strdup(ch_name);
+		return 0;
+	}
+
+	return 1;
+}
+
+static int peripheral_udev_update(int fd, void *data)
+{
+	struct udev_monitor *mon = data;
+	struct udev_device *dev;
+	const char *devnode;
+	const char *action;
+	const char *rproc;
+	const char *name;
+
+	dev = udev_monitor_receive_device(mon);
+	if (!dev)
+		return 0;
+
+	action = udev_device_get_action(dev);
+	devnode = udev_device_get_devnode(dev);
+
+	if (!devnode)
+		goto unref_dev;
+
+	if (strcmp(action, "add") == 0) {
+		name = peripheral_udev_get_name(dev);
+		rproc = peripheral_udev_get_remoteproc(dev);
+
+		if (!name || !rproc)
+			goto unref_dev;
+
+		devnode_add(devnode, name, rproc);
+		peripheral_open(peripheral_get_by_name(rproc));
+	} else if (strcmp(action, "remove") == 0) {
+		rproc = peripheral_udev_get_remoteproc(dev);
+
+		if (!rproc)
+			goto unref_dev;
+
+		devnode_remove(devnode);
+		peripheral_close(peripheral_get_by_name(rproc));
+	} else {
+		warn("unknown udev action");
+	}
+
+unref_dev:
+	udev_device_unref(dev);
+
+	return 0;
+}
+
+int peripheral_init()
+{
+	struct list_head *item;
+	struct peripheral *peripheral;
+
+	peripheral_udev_init();
+
+	peripheral = peripheral_create("hexagon");
+	peripheral_set_channel(peripheral, "DIAG", peripheral_ch_type_data);
+	peripheral_set_channel(peripheral, "DIAG_CNTL", peripheral_ch_type_ctrl);
+	peripheral_set_channel(peripheral, "DIAG_CMD", peripheral_ch_type_cmd);
+
+	peripheral = peripheral_create("pronto");
+	peripheral_set_channel(peripheral, "APPS_RIVA_DATA", peripheral_ch_type_data);
+	peripheral_set_channel(peripheral, "APPS_RIVA_CTRL", peripheral_ch_type_ctrl);
+
+	list_for_each(item, &peripherals) {
+		peripheral = container_of(item, struct peripheral, node);
+		peripheral_open(peripheral);
+	}
+
+	return 0;
+}
+
+int peripheral_exit()
+{
+	struct list_head *item;
+	struct peripheral *peripheral;
+
+	/* Destroy each device */
+	list_for_each(item, &peripherals) {
+		peripheral = container_of(item, struct peripheral, node);
+		peripheral_destroy(peripheral);
+	}
 
 	return 0;
 }

@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2016-2017, The Linux Foundation. All rights reserved.
  * Copyright (c) 2016, Linaro Ltd.
  * All rights reserved.
  *
@@ -31,7 +32,32 @@
 #ifndef __PERIPHERAL_H__
 #define __PERIPHERAL_H__
 
-int peripheral_init(void);
-void peripheral_close(struct peripheral *peripheral);
+#include "list.h"
 
+enum peripheral_ch_type {
+	peripheral_ch_type_data = 0,
+	peripheral_ch_type_ctrl,
+	peripheral_ch_type_cmd,
+	MAX_NUM_OF_CH
+};
+
+struct channel {
+	char *name;
+	struct list_head queue;
+	int fd;
+};
+
+struct peripheral {
+	char *name;
+	unsigned long features;
+	struct channel channels[MAX_NUM_OF_CH];
+
+	struct list_head node;
+};
+
+extern struct list_head peripherals;
+
+int peripheral_init();
+void peripheral_close(struct peripheral *peripheral);
+int peripheral_exit();
 #endif

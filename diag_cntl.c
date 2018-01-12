@@ -202,7 +202,12 @@ void diag_cntl_send_feature_mask(struct peripheral *peripheral)
 	pkt->mask[0] = mask >> 8;
 	pkt->mask[1] = mask & 0xff;
 
-	queue_push(&peripheral->cntlq, (uint8_t *)pkt, len);
+	if (peripheral->channels[peripheral_ch_type_ctrl].name) {
+		diag_dbg(DIAG_DBG_CNTL, "Respond with feature mask to peripheral %s\n", peripheral->name);
+		queue_push(&peripheral->channels[peripheral_ch_type_ctrl].queue, (uint8_t *)pkt, len);
+	} else {
+		diag_dbg(DIAG_DBG_CNTL, "Peripheral %s control channel not configured\n", peripheral->name);
+	}
 }
 
 int diag_cntl_recv(int fd, void *data)
