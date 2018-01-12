@@ -89,6 +89,23 @@ void queue_push(struct list_head *queue, uint8_t *msg, size_t msglen)
 	list_add(queue, &mbuf->node);
 }
 
+int diag_cmd_recv(int fd, void *data)
+{
+	struct peripheral *peripheral = data;
+	uint8_t buf[APPS_BUF_SIZE];
+	ssize_t n;
+
+	n = read(fd, buf, sizeof(buf));
+	if (n < 0) {
+		if (errno != EAGAIN) {
+			warn("failed to read from cmd channel");
+			peripheral_close(peripheral);
+		}
+	}
+
+	return 0;
+}
+
 int diag_data_recv(int fd, void *data)
 {
 	struct peripheral *peripheral = data;
