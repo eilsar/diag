@@ -86,6 +86,7 @@ void queue_push(struct list_head *queue, uint8_t *msg, size_t msglen)
 	ptr = mbuf_put(mbuf, msglen);
 	memcpy(ptr, msg, msglen);
 
+	diag_dbg_dump(DIAG_DBG_MAIN_DUMP, "Buffer to send:\n", msg, msglen);
 	list_add(queue, &mbuf->node);
 }
 
@@ -125,7 +126,6 @@ int diag_data_recv(int fd, void *data)
 				warn("failed to read from data channel");
 				peripheral_close(peripheral);
 			}
-
 			break;
 		}
 
@@ -183,7 +183,7 @@ static int diag_sock_connect(const char *hostname, unsigned short port)
 	if (ret < 0)
 		return -errno;
 
-	printf("Connected to %s:%d\n", hostname, port);
+	diag_info("Connected to %s:%d\n", hostname, port);
 
 	return fd;
 }
@@ -239,6 +239,7 @@ static void diag_rsp_bad_command(struct diag_client *client,
 	buf[0] = 0x13;
 	memcpy(buf + 1, msg, len);
 
+	diag_dbg(DIAG_DBG_MAIN, "Respond with bad command\n");
 	hdlc_enqueue(&client->outq, buf, len + 1);
 
 	free(buf);
@@ -261,12 +262,14 @@ static int diag_sock_recv(int fd, void *data)
 
 	ptr = buf;
 	len = n;
+	diag_dbg_dump(DIAG_DBG_MAIN_DUMP, "Received buffer:\n", ptr, len);
 	for (;;) {
 		msg = hdlc_decode_one(&ptr, &len, &msglen);
 		if (!msg)
 			break;
 
 		ret = diag_cmd_dispatch(msg, msglen);
+		diag_dbg_dump(DIAG_DBG_MAIN, "Decoded buffer:\n", msg, msglen);
 		if (ret < 0)
 			diag_rsp_bad_command(client, msg, msglen);
 	}
@@ -345,6 +348,8 @@ int main(int argc, char **argv)
 	diag_dbg(DIAG_DBG_MAIN, "Opened client %s with fd=%d\n", client->name, client->fd);
 
 	peripheral_init();
+
+	diag_dbg(DIAG_DBG_MAIN, "Starting loop\n");
 
 	watch_run();
 

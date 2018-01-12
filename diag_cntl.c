@@ -37,7 +37,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
 #include "diag.h"
+#include "diag_dbg.h"
 #include "diag_cntl.h"
 #include "peripheral.h"
 #include "util.h"
@@ -117,6 +119,7 @@ static int diag_cntl_register(struct peripheral *peripheral,
 	unsigned int last;
 	int i;
 
+	diag_dbg(DIAG_DBG_CNTL, "Peripheral %s\n", peripheral->name);
 	for (i = 0; i < pkt->count_entries; i++) {
 		cmd = pkt->cmd;
 		subsys = pkt->subsys;
@@ -127,9 +130,6 @@ static int diag_cntl_register(struct peripheral *peripheral,
 		first = cmd << 24 | subsys << 16 | pkt->ranges[i].first;
 		last = cmd << 24 | subsys << 16 | pkt->ranges[i].last;
 
-		// printf("[%s] register 0x%x - 0x%x\n",
-		//	  peripheral->name, first, last);
-
 		dc = malloc(sizeof(*dc));
 		if (!dc) {
 			warn("malloc failed");
@@ -137,6 +137,7 @@ static int diag_cntl_register(struct peripheral *peripheral,
 		}
 		memset(dc, 0, sizeof(*dc));
 
+		diag_dbg(DIAG_DBG_CNTL, "[%s] registered commands: 0x%x - 0x%x\n", peripheral->name, first, last);
 		dc->first = first;
 		dc->last = last;
 		dc->peripheral = peripheral;
@@ -153,30 +154,30 @@ static int diag_cntl_feature_mask(struct peripheral *peripheral,
 	struct diag_cntl_cmd_feature *pkt = to_cmd_feature(hdr);
 	uint32_t mask = 0;
 	int i;
+	char features[256] = "";
 
+	diag_dbg(DIAG_DBG_CNTL, "Peripheral %s\n", peripheral->name);
 	for (i = 0; i < pkt->mask_len && i < sizeof(mask); i++)
 		mask |= pkt->mask[i] << (8 * i);
 
-	printf("[%s] mask:", peripheral->name);
-
 	if (mask & DIAG_FEATURE_FEATURE_MASK_SUPPORT)
-		printf(" FEATURE_MASK_SUPPORT");
+		strcat(features, " FEATURE_MASK_SUPPORT");
 	if (mask & DIAG_FEATURE_LOG_ON_DEMAND_APPS)
-		printf(" LOG_ON_DEMAND");
+		strcat(features, " LOG_ON_DEMAND");
 	if (mask & DIAG_FEATURE_REQ_RSP_SUPPORT)
-		printf(" REQ_RSP");
+		strcat(features, " REQ_RSP");
 	if (mask & DIAG_FEATURE_APPS_HDLC_ENCODE)
-		printf(" APPS_HDLC_ENCODE");
+		strcat(features, " APPS_HDLC_ENCODE");
 	if (mask & DIAG_FEATURE_STM)
-		printf(" STM");
+		strcat(features, " STM");
 	if (mask & DIAG_FEATURE_PERIPHERAL_BUFFERING)
-		printf(" PERIPHERAL-BUFFERING");
+		strcat(features, " PERIPHERAL-BUFFERING");
 	if (mask & DIAG_FEATURE_MASK_CENTRALIZATION)
-		printf(" MASK-CENTERALIZATION");
+		strcat(features, " MASK-CENTERALIZATION");
 	if (mask & DIAG_FEATURE_SOCKETS_ENABLED)
-		printf(" SOCKETS");
+		strcat(features, " SOCKETS");
 
-	printf(" (0x%x)\n", mask);
+	diag_dbg(DIAG_DBG_CNTL, "[%s] mask: %s (0x%x)\n", peripheral->name, features, mask);
 
 	peripheral->features = mask;
 
@@ -221,6 +222,7 @@ int diag_cntl_recv(int fd, void *data)
 		return 0;
 	}
 
+	diag_dbg_dump(DIAG_DBG_CNTL_DUMP, "Received CTRL:\n", buf, n);
 	for (;;) {
 		if (offset + sizeof(struct diag_cntl_hdr) > n)
 			break;
