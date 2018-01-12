@@ -45,30 +45,60 @@
 #include "util.h"
 #include "watch.h"
 
-struct diag_transport_config *config = NULL;
-uint8_t buf[APPS_BUF_SIZE] = { 0 };
+static struct diag_transport_config *config = NULL;
+static uint8_t g_buf[APPS_BUF_SIZE] = { 0 };
+static size_t g_offset = 0;
 
 static int diag_transport_recv(int fd, void* data)
 {
-	struct diag_client *client = (struct diag_client *)data;
-	uint8_t buf[APPS_BUF_SIZE] = { 0 };
-	size_t len;
+	struct diag_client *client = data;
+	void *buf = g_buf + g_offset, *curr_pkt_ptr = g_buf, *next_pkt_ptr;
+	size_t buf_len = sizeof(g_buf) - g_offset, pkt_len = 0;
 	ssize_t n;
 	struct mbuf *packet;
 
-	n = read(client->in_fd, buf, sizeof(buf));
-	if ((n < 0) && (errno != EAGAIN)) {
-		warn("Failed to read from fd=%d\n", client->in_fd);
-		return n;
+	while (curr_pkt_ptr == g_buf) { // loop till we get at least one full packet
+		n = read(client->in_fd, buf, buf_len);
+		if (n <= 0) {
+			if (errno != EAGAIN) {
+				warn("Failed to read from fd=%d\n", client->in_fd);
+				return -errno;
+			} else {
+				continue;
+			}
+		}
+
+		buf_len -= n;
+		g_offset += n;
+
+		for ( ;; ) {
+			next_pkt_ptr = memchr(curr_pkt_ptr, 0x7e, n); // look for end of packet char
+			if (next_pkt_ptr == NULL) {
+				buf = g_buf + g_offset;
+				pkt_len = buf - curr_pkt_ptr;
+				break; // need to read some more to get the end of packet char
+			}
+			next_pkt_ptr++;
+
+			pkt_len = next_pkt_ptr - curr_pkt_ptr;
+			n -= pkt_len;
+			diag_dbg_dump(DIAG_DBG_TRANSPORT_DUMP, "Received:\n", curr_pkt_ptr, pkt_len);
+			packet = create_packet(curr_pkt_ptr, pkt_len, client->encoded ? DECODE : KEEP_AS_IS);
+			curr_pkt_ptr = next_pkt_ptr;
+			if (packet == NULL)
+				return -ENOMEM;
+			diag_client_handle_command(client, (uint8_t *)packet->data, packet->offset);
+			free(packet);
+		}
 	}
 
-	len = n;
+	g_offset = pkt_len;
 
-	packet = create_packet(buf, len, DECODE);
-	if (packet == NULL)
-		return -ENOMEM;
-	diag_client_handle_command(client, (uint8_t *)packet->data, packet->offset);
-	free(packet);
+	// save part of packet if any for next call
+	if (pkt_len) {
+		memcpy(g_buf, curr_pkt_ptr, pkt_len);
+		memset(g_buf + g_offset, 0, sizeof(g_buf) - g_offset);
+	}
 
 	return 0;
 }
