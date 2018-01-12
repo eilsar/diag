@@ -132,6 +132,8 @@ struct diag_transport_config {
 #define DEFAULT_SOCKET_PORT 2500
 #define DEFAULT_BAUD_RATE 115200
 
+int diag_transport_send(struct diag_client *client, void *buf, size_t len);
+
 int diag_transport_init(struct diag_transport_config *config);
 int diag_transport_exit();
 

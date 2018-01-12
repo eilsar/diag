@@ -103,6 +103,26 @@ static int diag_transport_recv(int fd, void* data)
 	return 0;
 }
 
+int diag_transport_send(struct diag_client *client, void *buf, size_t len)
+{
+	struct mbuf *resp_packet = create_packet(buf, len, ENCODE);
+
+	if (resp_packet == NULL) {
+		warn("failed to create packet");
+
+		return -1;
+	}
+
+	if (client == NULL) {
+		client = config->client;
+	}
+
+	diag_dbg_dump(DIAG_DBG_TRANSPORT_DUMP, "Sending:\n", resp_packet->data, resp_packet->offset);
+	queue_push(&client->outq, resp_packet);
+
+	return 0;
+}
+
 int diag_transport_init(struct diag_transport_config *dtc)
 {
 	int ret;

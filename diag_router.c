@@ -59,7 +59,6 @@ static int diag_cmd_dispatch(struct diag_client *client,
 	struct diag_cmd *dc;
 	unsigned int key;
 	uint8_t *ptr = buf;
-	struct mbuf *resp_packet;
 
 	if (ptr[0] == DIAG_CMD_SUBSYS_DISPATCH || ptr[0] == DIAG_CMD_SUBSYS_DISPATCH_V2) {
 		key = ptr[0] << 24 | ptr[1] << 16 | ptr[3] << 8 | ptr[2];
@@ -70,15 +69,7 @@ static int diag_cmd_dispatch(struct diag_client *client,
 	}
 
 	if (key == DIAG_CMD_KEEP_ALIVE_KEY) {
-		resp_packet = create_packet(ptr, len, ENCODE);
-		if (resp_packet == NULL) {
-
-			return -1;
-		}
-
-		queue_push(&client->outq, resp_packet);
-
-		return 0;
+		return diag_transport_send(client, buf, len);
 	}
 
 	list_for_each(item, &common_cmds) {
@@ -124,7 +115,7 @@ static int diag_rsp_bad_command(struct diag_client *client,
 {
 	uint8_t *resp_buf;
 	size_t resp_buf_len = len + 1;
-	struct mbuf *resp_packet;
+	int ret;
 
 	if (posix_memalign((void **)&resp_buf, PACKET_ALLOC_ALIGNMENT, resp_buf_len)) {
 		warn("failed to allocate error buffer");
@@ -134,16 +125,10 @@ static int diag_rsp_bad_command(struct diag_client *client,
 	resp_buf[0] = bad_code;
 	memcpy(resp_buf + 1, buf, len);
 
-	resp_packet = create_packet(resp_buf, resp_buf_len, ENCODE);
+	ret = diag_transport_send(client, resp_buf, resp_buf_len);
 	free(resp_buf);
-	if (resp_packet == NULL) {
 
-		return -1;
-	}
-
-	queue_push(&client->outq, resp_packet);
-
-	return 0;
+	return ret;
 }
 
 int diag_router_handle_incoming(struct diag_client *client, void *buf, size_t len)
@@ -208,21 +193,6 @@ struct diag_log_cmd_mask {
 #define DIAG_CMD_EVENT_ERROR_CODE_OK			0
 #define DIAG_CMD_EVENT_ERROR_CODE_FAIL			1
 
-static int send_packet(struct diag_client *client, void *buf, size_t len, uint8_t transform)
-{
-	struct mbuf *resp_packet = create_packet(buf, len, transform);
-
-	if (resp_packet == NULL) {
-		warn("failed to create packet");
-
-		return -1;
-	}
-
-	queue_push(&client->outq, resp_packet);
-
-	return 0;
-}
-
 static int diag_router_handle_logging_configuration_response(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len)
 {
 	struct diag_log_cmd_header {
@@ -254,7 +224,7 @@ static int diag_router_handle_logging_configuration_response(struct diag_cmd *dc
 			diag_cntl_send_log_mask(peripheral, 0); // equip_id is ignored
 		}
 
-		ret = send_packet(client, (uint8_t *)&resp, sizeof(resp), ENCODE);
+		ret = diag_transport_send(client, &resp, sizeof(resp));
 		break;
 	}
 	case DIAG_CMD_OP_GET_LOG_RANGE: {
@@ -272,7 +242,7 @@ static int diag_router_handle_logging_configuration_response(struct diag_cmd *dc
 		diag_cmd_get_log_range(resp.ranges, MAX_EQUIP_ID);
 		resp.status = DIAG_CMD_STATUS_SUCCESS;
 
-		ret = send_packet(client, (uint8_t *)&resp, sizeof(resp), ENCODE);
+		ret = diag_transport_send(client, &resp, sizeof(resp));
 
 		break;
 	}
@@ -306,7 +276,7 @@ static int diag_router_handle_logging_configuration_response(struct diag_cmd *dc
 			diag_cntl_send_log_mask(peripheral, resp->mask_structure.equip_id);
 		}
 
-		ret = send_packet(client, resp, resp_size, ENCODE);
+		ret = diag_transport_send(client, resp, resp_size);
 		free(resp);
 
 		break;
@@ -357,7 +327,7 @@ static int diag_router_handle_logging_configuration_response(struct diag_cmd *dc
 			diag_cntl_send_log_mask(peripheral, resp->mask_structure.equip_id);
 		}
 
-		ret = send_packet(client, resp, resp_size, ENCODE);
+		ret = diag_transport_send(client, resp, resp_size);
 		free(resp);
 
 		break;
@@ -414,7 +384,7 @@ static int diag_router_handle_extended_message_configuration_response(struct dia
 		}
 		resp->status = DIAG_CMD_MSG_STATUS_SUCCESSFUL;
 
-		ret = send_packet(client, (uint8_t *)resp, resp_size, ENCODE);
+		ret = diag_transport_send(client, resp, resp_size);
 		free(resp);
 
 		break;
@@ -457,7 +427,7 @@ static int diag_router_handle_extended_message_configuration_response(struct dia
 			resp->status = DIAG_CMD_MSG_STATUS_UNSUCCESSFUL;
 		}
 
-		ret = send_packet(client, (uint8_t *)resp, resp_size, ENCODE);
+		ret = diag_transport_send(client, resp, resp_size);
 		free(resp);
 
 		break;
@@ -500,7 +470,7 @@ static int diag_router_handle_extended_message_configuration_response(struct dia
 			resp->status = DIAG_CMD_MSG_STATUS_UNSUCCESSFUL;
 		}
 
-		ret = send_packet(client, resp, resp_size, ENCODE);
+		ret = diag_transport_send(client, resp, resp_size);
 		free(resp);
 
 		break;
@@ -555,7 +525,7 @@ static int diag_router_handle_extended_message_configuration_response(struct dia
 			resp->status = DIAG_CMD_MSG_STATUS_UNSUCCESSFUL;
 		}
 
-		ret = send_packet(client, (uint8_t *)resp, resp_size, ENCODE);
+		ret = diag_transport_send(client, resp, resp_size);
 		free(resp);
 
 		break;
@@ -588,7 +558,7 @@ static int diag_router_handle_extended_message_configuration_response(struct dia
 			diag_cntl_send_msg_mask(peripheral, NULL); // range is ignored
 		}
 
-		ret = send_packet(client, (uint8_t *)&resp, sizeof(resp), ENCODE);
+		ret = diag_transport_send(client, &resp, sizeof(resp));
 		break;
 	}
 	default:
@@ -650,7 +620,7 @@ static int diag_router_handle_event_get_mask_response(struct diag_cmd *dc, struc
 		resp->error_code = DIAG_CMD_EVENT_ERROR_CODE_FAIL;
 	}
 
-	ret = send_packet(client, (uint8_t *)resp, resp_size, ENCODE);
+	ret = diag_transport_send(client, resp, resp_size);
 	free(resp);
 
 	return ret;
@@ -709,7 +679,7 @@ static int diag_router_handle_event_set_mask_response(struct diag_cmd *dc, struc
 		resp->error_code = DIAG_CMD_EVENT_ERROR_CODE_FAIL;
 	}
 
-	ret = send_packet(client, (uint8_t *)resp, resp_size, ENCODE);
+	ret = diag_transport_send(client, resp, resp_size);
 	free(resp);
 
 	return ret;
@@ -724,7 +694,7 @@ static int diag_router_handle_event_report_control_response(struct diag_cmd *dc,
 	struct {
 		uint8_t cmd_code;
 		uint16_t length;
-	} __packed pkt;
+	} __packed resp;
 	struct list_head *item;
 	struct peripheral *peripheral;
 	int ret;
@@ -738,15 +708,15 @@ static int diag_router_handle_event_report_control_response(struct diag_cmd *dc,
 	case DIAG_CTRL_MASK_ALL_DISABLED:
 	case DIAG_CTRL_MASK_ALL_ENABLED:
 		diag_cmd_toggle_events(req->operation_switch);
-		pkt.cmd_code = req->cmd_code;
-		pkt.length = 0;
+		resp.cmd_code = req->cmd_code;
+		resp.length = 0;
 
 		list_for_each(item, &peripherals) {
 			peripheral = container_of(item, struct peripheral, node);
 			diag_cntl_send_event_mask(peripheral);
 		}
 
-		ret = send_packet(client, (uint8_t *)&pkt, sizeof(pkt), ENCODE);
+		ret = diag_transport_send(client, &resp, sizeof(resp));
 		break;
 	default:
 		warn("Unrecognized operation %d!!!", req->operation_switch);
@@ -776,7 +746,6 @@ static void diag_router_send_msg_mask_to_all()
 
 static int diag_router_handle_extended_build_id(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len)
 {
-	struct mbuf *resp_packet;
 	struct extended_build_id_request {
 		uint8_t cmd_code;
 	} *req = buf;
@@ -790,6 +759,7 @@ static int diag_router_handle_extended_build_id(struct diag_cmd *dc, struct diag
 		char strings[];
 	} __packed *resp;
 	size_t resp_size;
+	int ret;
 	size_t string1_size = strlen(MOBILE_SOFTWARE_REVISION) + 1;
 	size_t string2_size = strlen(MOBILE_MODEL_STRING) + 1;
 	size_t strings_size = string1_size + string2_size;
@@ -810,22 +780,14 @@ static int diag_router_handle_extended_build_id(struct diag_cmd *dc, struct diag
 	strncpy(resp->strings, MOBILE_SOFTWARE_REVISION, string1_size);
 	strncpy(resp->strings + string1_size, MOBILE_MODEL_STRING, string2_size);
 
-	resp_packet = create_packet((uint8_t *)resp, resp_size, ENCODE);
+	ret = diag_transport_send(client, resp, resp_size);
 	free(resp);
-	if (resp_packet == NULL) {
-		warn("failed to create packet");
 
-		return -1;
-	}
-
-	queue_push(&client->outq, resp_packet);
-
-	return 0;
+	return ret;
 }
 
 static int diag_router_handle_diag_version(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len)
 {
-	struct mbuf *resp_packet;
 	struct diag_version_request {
 		uint8_t cmd_code;
 	} *req = buf;
@@ -843,16 +805,7 @@ static int diag_router_handle_diag_version(struct diag_cmd *dc, struct diag_clie
 	resp.cmd_code = req->cmd_code;
 	resp.ver = DIAG_PROTOCOL_VERSION_NUMBER;
 
-	resp_packet = create_packet((uint8_t *)&resp, sizeof(resp), ENCODE);
-	if (resp_packet == NULL) {
-		warn("failed to create packet");
-
-		return -1;
-	}
-
-	queue_push(&client->outq, resp_packet);
-
-	return 0;
+	return diag_transport_send(client, &resp, sizeof(resp));
 }
 
 static struct diag_cmd *register_diag_cmd(unsigned int key,
