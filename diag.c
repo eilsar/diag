@@ -155,39 +155,6 @@ int diag_data_recv(int fd, void *data)
 	return 0;
 }
 
-static int diag_sock_connect(const char *hostname, unsigned short port)
-{
-	struct sockaddr_in addr;
-	struct hostent *host;
-	int ret;
-	int fd;
-
-	fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
-	if (fd < 0)
-		return -errno;
-
-	host = gethostbyname(hostname);
-	if (!host)
-		return -errno;
-
-	bzero(&addr, sizeof(addr));
-	addr.sin_family = AF_INET;
-	bcopy(host->h_addr, &addr.sin_addr.s_addr, host->h_length);
-	addr.sin_port = htons(port);
-
-	ret = connect(fd, (const struct sockaddr *)&addr, sizeof(addr));
-	if (ret < 0)
-		return -errno;
-
-	ret = fcntl(fd, F_SETFL, O_NONBLOCK);
-	if (ret < 0)
-		return -errno;
-
-	diag_info("Connected to %s:%d\n", hostname, port);
-
-	return fd;
-}
-
 static int diag_cmd_dispatch(struct diag_client *client,
 				uint8_t *ptr, size_t len)
 {
@@ -225,7 +192,6 @@ static int diag_cmd_dispatch(struct diag_client *client,
 
 		handled++;
 	}
-
 
 	return handled ? 0 : -ENOENT;
 }
