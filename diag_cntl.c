@@ -141,6 +141,7 @@ static int diag_cntl_register(struct peripheral *peripheral,
 		dc->first = first;
 		dc->last = last;
 		dc->peripheral = peripheral;
+		dc->cb = diag_cmd_forward_to_peripheral;
 
 		list_add(&diag_cmds, &dc->node);
 	}

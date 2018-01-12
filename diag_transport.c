@@ -87,7 +87,7 @@ static int diag_transport_recv(int fd, void* data)
 			curr_pkt_ptr = next_pkt_ptr;
 			if (packet == NULL)
 				return -ENOMEM;
-			diag_client_handle_command(client, (uint8_t *)packet->data, packet->offset);
+			diag_router_handle_incoming(client, (uint8_t *)packet->data, packet->offset);
 			free(packet);
 		}
 	}

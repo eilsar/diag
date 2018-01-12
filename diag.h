@@ -65,11 +65,12 @@ struct diag_client {
 extern struct list_head diag_clients;
 
 struct diag_cmd {
-	struct list_head node;
 	unsigned int first;
 	unsigned int last;
-
 	struct peripheral *peripheral;
+	int(*cb)(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len);
+
+	struct list_head node;
 };
 
 extern struct list_head diag_cmds;
@@ -79,7 +80,7 @@ int diag_data_recv(int fd, void *data);
 
 #define APPS_BUF_SIZE 4096
 
-int diag_client_handle_command(struct diag_client *client, void *buf, size_t len);
+int diag_router_handle_incoming(struct diag_client *client, void *buf, size_t len);
 
 struct diag_transport_config {
 	const char *hostname;
@@ -97,4 +98,5 @@ struct diag_transport_config {
 int diag_transport_init(struct diag_transport_config *config);
 int diag_transport_exit();
 
+int diag_cmd_forward_to_peripheral(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len);
 #endif // __DIAG_H__

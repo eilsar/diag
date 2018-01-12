@@ -43,14 +43,14 @@
 #include "util.h"
 
 static int diag_cmd_dispatch(struct diag_client *client,
-				uint8_t *ptr, size_t len)
+				void *buf, size_t len)
 {
 	struct peripheral *peripheral;
 	struct list_head *item;
 	struct diag_cmd *dc;
 	unsigned int key;
-	int handled = 0;
-	struct mbuf *fwd_packet;
+	uint8_t *ptr = buf;
+	struct mbuf *resp_packet;
 
 	if (ptr[0] == DIAG_CMD_SUBSYS_DISPATCH)
 		key = ptr[0] << 24 | ptr[1] << 16 | ptr[3] << 8 | ptr[2];
@@ -58,29 +58,32 @@ static int diag_cmd_dispatch(struct diag_client *client,
 		key = 0xff << 24 | 0xff << 16 | ptr[0];
 
 	if (key == 0x4b320003) {
-		fwd_packet = create_packet(ptr, len, ENCODE);
-		if (fwd_packet)
-			queue_push(&client->outq, fwd_packet);
+		resp_packet = create_packet(ptr, len, ENCODE);
+		if (resp_packet == NULL) {
+
+			return -1;
+		}
+
+		queue_push(&client->outq, resp_packet);
 
 		return 0;
 	}
 
 	list_for_each(item, &diag_cmds) {
 		dc = container_of(item, struct diag_cmd, node);
-		if (key < dc->first || key > dc->last)
+		if (key < dc->first || key > dc->last) {
 			continue;
+		}
 
 		peripheral = dc->peripheral;
-		diag_dbg(DIAG_DBG_MAIN, "Respond via peripheral %s\n", peripheral->name);
-		fwd_packet = create_packet(ptr, len, peripheral->features & DIAG_FEATURE_APPS_HDLC_ENCODE ? KEEP_AS_IS : ENCODE);
-		if (fwd_packet == NULL)
-			break;
-		queue_push(&peripheral->channels[peripheral_ch_type_cmd].queue, fwd_packet);
 
-		handled++;
+		diag_dbg(DIAG_DBG_ROUTER, "Respond via peripheral %s\n", peripheral->name);
+
+		return dc->cb(dc, client, buf, len);
+
 	}
 
-	return handled ? 0 : -ENOENT;
+	return -ENOENT;
 }
 
 static int diag_rsp_bad_command(struct diag_client *client,
@@ -112,7 +115,7 @@ static int diag_rsp_bad_command(struct diag_client *client,
 	return 0;
 }
 
-int diag_client_handle_command(struct diag_client *client, void *buf, size_t len)
+int diag_router_handle_incoming(struct diag_client *client, void *buf, size_t len)
 {
 	int ret;
 
@@ -121,4 +124,29 @@ int diag_client_handle_command(struct diag_client *client, void *buf, size_t len
 		ret = diag_rsp_bad_command(client, buf, len);
 
 	return ret;
+}
+
+int diag_cmd_forward_to_peripheral(struct diag_cmd *dc, struct diag_client *client, void *buf, size_t len)
+{
+	struct peripheral *peripheral = dc->peripheral;
+	struct mbuf *fwd_packet;
+
+	if (!peripheral->channels[peripheral_ch_type_cmd].name) {
+		warn("No command channel for peripheral %s!\n", peripheral->name);
+
+		return -1;
+	}
+
+	fwd_packet = create_packet(buf, len, (peripheral->features & DIAG_FEATURE_APPS_HDLC_ENCODE) ? KEEP_AS_IS : ENCODE);
+	if (fwd_packet == NULL) {
+		warn("failed to create packet");
+
+		return -1;
+	}
+
+	queue_push(&peripheral->channels[peripheral_ch_type_cmd].queue, fwd_packet);
+
+	diag_dbg(DIAG_DBG_ROUTER, "forwarded to %s\n", peripheral->name);
+
+	return 0;
 }
